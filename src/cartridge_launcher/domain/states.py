@@ -1,0 +1,16 @@
+from __future__ import annotations
+
+from enum import StrEnum
+
+
+class LauncherState(StrEnum):
+    NOT_INSERTED = "NOT_INSERTED"
+    VALIDATING = "VALIDATING"
+    READY = "READY"
+    OPENING = "OPENING"
+    GAME_RUNNING = "GAME_RUNNING"
+    NOT_INSTALLED = "NOT_INSTALLED"
+    STEAM_REQUIRED = "STEAM_REQUIRED"
+    INVALID_CARTRIDGE = "INVALID_CARTRIDGE"
+    DEVICE_MISMATCH = "DEVICE_MISMATCH"
+    ERROR = "ERROR"

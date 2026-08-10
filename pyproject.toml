@@ -1,0 +1,33 @@
+[project]
+name = "cartridge-launcher"
+version = "0.1.0"
+description = "Prototype launcher that maps physical SSD cartridges to Steam games."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "Pillow>=10.0",
+  "pystray>=0.19",
+  "pywin32>=306; platform_system=='Windows'",
+]
+
+[project.optional-dependencies]
+build = [
+  "pyinstaller>=6.0",
+]
+dev = [
+  "pytest>=8.0",
+]
+
+[project.scripts]
+cartridge-launcher = "cartridge_launcher.app.main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
