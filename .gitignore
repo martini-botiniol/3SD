@@ -40,12 +40,12 @@ ENV/
 .ruff_cache/
 .coverage
 htmlcov/
-dist/
-build/
+/dist/
+/build/
 *.egg-info/
 
 # 3SD local/generated files
-.cartridge-launcher/
+.3sd/
 *.spec
 
 # JavaScript and frontend build outputs

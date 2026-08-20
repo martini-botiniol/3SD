@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 
-APP_ICON_RELATIVE_PATHS = (Path("assets") / "3SD.ico", Path("assets") / "CartridgeLauncher.ico")
+APP_ICON_RELATIVE_PATHS = (Path("assets") / "3SD.ico",)
 
 
 def appIconPath() -> Path | None:

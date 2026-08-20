@@ -121,6 +121,37 @@ class TrayAppTests(unittest.TestCase):
         self.assertTrue(app.statusMessages.empty())
         self.assertIsNone(app.steamIntegration.openedAppId)
 
+    def testRemovedCartridgeSendsNotification(self) -> None:
+        notifications = []
+        app = object.__new__(TrayApp)
+        app.steamAction = "none"
+        app.statusMessages = __import__("queue").Queue()
+        app.queuedStatusPopupKeys = set()
+        app.displayedStatusPopupKeys = set()
+        app.lastStatusPopupKey = None
+        app.libraryOpen = False
+        app.readyNotificationCartridgeId = "cart-1"
+        app.icon = type("Icon", (), {"notify": lambda _self, message, title: notifications.append((title, message))})()
+        app.logger = type("Logger", (), {"warning": lambda *_args: None})()
+
+        app._handleStates((AppState(state=LauncherState.NOT_INSERTED, rootPath="G:\\"),))
+
+        self.assertEqual(notifications, [("Cartucho expulsado", "El SSD cartucho fue expulsado.\nG:\\")])
+        self.assertIsNone(app.readyNotificationCartridgeId)
+
+    def testRepeatedRemovedCartridgePopupsAreNotDeduplicated(self) -> None:
+        app = object.__new__(TrayApp)
+        app.statusMessages = __import__("queue").Queue()
+        app.queuedStatusPopupKeys = set()
+        app.displayedStatusPopupKeys = {"NOT_INSERTED:G\\:::waiting for cartridge"}
+        message = __import__("cartridge_launcher.ui.status_messages", fromlist=["statusPopupMessageFromState"]).statusPopupMessageFromState(
+            AppState(state=LauncherState.NOT_INSERTED, rootPath="G:\\", message="waiting for cartridge")
+        )
+
+        app._queueStatusPopup(message)
+
+        self.assertFalse(app.statusMessages.empty())
+
     def testFailedSteamActionDoesNotConsumeSessionAction(self) -> None:
         app = object.__new__(TrayApp)
         app.steamAction = "open"

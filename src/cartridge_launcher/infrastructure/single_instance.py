@@ -7,7 +7,7 @@ ERROR_ALREADY_EXISTS = 183
 
 
 class SingleInstanceLock:
-    def __init__(self, path: Path, mutexName: str = "Local\\CartridgeLauncherSingleInstance"):
+    def __init__(self, path: Path, mutexName: str = "Local\\3SDSingleInstance"):
         self.path = path
         self.acquired = False
         self.mutexName = mutexName
@@ -63,7 +63,7 @@ class SingleInstanceLock:
 
 class SingleInstanceSignal:
     def __init__(self, path: Path | None = None):
-        self.path = path or (Path.home() / ".cartridge-launcher" / "open.signal")
+        self.path = path or (Path.home() / ".3sd" / "open.signal")
 
     def create(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

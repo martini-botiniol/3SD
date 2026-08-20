@@ -41,4 +41,4 @@ class RuntimeStatusStore:
 
 
 def defaultRuntimeStatusStore() -> RuntimeStatusStore:
-    return RuntimeStatusStore(Path.home() / ".cartridge-launcher" / "runtime-status.json")
+    return RuntimeStatusStore(Path.home() / ".3sd" / "runtime-status.json")
