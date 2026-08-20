@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def configureLogging(logPath: Path | None = None) -> logging.Logger:
-    logger = logging.getLogger("cartridge_launcher")
+    logger = logging.getLogger("3SD")
     logger.setLevel(logging.INFO)
     if logger.handlers:
         return logger

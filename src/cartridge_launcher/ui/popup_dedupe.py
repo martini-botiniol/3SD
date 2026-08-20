@@ -27,7 +27,7 @@ def shouldShowPopupKey(key: str, dataDirectory: Path | None = None, now: float |
 
 
 def dedupePath(dataDirectory: Path | None = None) -> Path:
-    directory = dataDirectory or (Path.home() / ".cartridge-launcher")
+    directory = dataDirectory or (Path.home() / ".3sd")
     return directory / "status-popup-dedupe.json"
 
 

@@ -9,6 +9,7 @@ from cartridge_launcher.infrastructure.single_instance import SingleInstanceLock
 from cartridge_launcher.infrastructure.startup_shortcut import disableStartup, enableStartup, isStartupEnabled
 from cartridge_launcher.infrastructure.windows_devices import WindowsDeviceScanner
 from cartridge_launcher.services.cartridge_creation_service import CartridgeCreationService
+from cartridge_launcher.services.cartridge_repair_service import CartridgeRepairService
 from cartridge_launcher.services.cartridge_update_service import CartridgeUpdateService
 from cartridge_launcher.services.local_registry import LocalRegistry
 from cartridge_launcher.services.security_service import SecurityService
@@ -17,7 +18,7 @@ from cartridge_launcher.ui.tray_app import TrayApp
 
 
 def defaultDataDirectory() -> Path:
-    return Path.home() / ".cartridge-launcher"
+    return Path.home() / ".3sd"
 
 
 def defaultArgs() -> argparse.Namespace:
@@ -32,7 +33,7 @@ def buildParser() -> argparse.ArgumentParser:
     tray = subparsers.add_parser("tray")
     tray.add_argument("--steam-action", choices=("auto", "open", "install", "none"), default="open")
     tray.add_argument("--open-window", action="store_true")
-    for name in ("create", "update"):
+    for name in ("create", "update", "repair"):
         command = subparsers.add_parser(name)
         command.add_argument("--root", required=True)
         command.add_argument("--display-name", required=True)
@@ -62,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
     command = args.command or defaultCommand()
     lock: SingleInstanceLock | None = None
     if requiresSingleInstance(command, args):
-        lock = SingleInstanceLock(defaultDataDirectory() / "cartridge-launcher.lock")
+        lock = SingleInstanceLock(defaultDataDirectory() / "3sd.lock")
         if not lock.acquire():
             SingleInstanceSignal().signalExisting()
             return 0
@@ -83,6 +84,10 @@ def main(argv: list[str] | None = None) -> int:
             manifest = CartridgeUpdateService(security, registry, scanner).update(Path(args.root), args.display_name, args.app_id)
             print(f"Cartucho actualizado: {manifest.displayName}")
             return 0
+        if command == "repair":
+            manifest = CartridgeRepairService(security, registry, scanner).repair(Path(args.root), args.display_name, args.app_id)
+            print(f"Cartucho reparado: {manifest.displayName}")
+            return 0
         if command == "startup":
             if args.action == "enable":
                 print(enableStartup())
@@ -100,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def defaultCommand() -> str:
     executablePath = Path(sys.executable)
-    if executablePath.name.lower().endswith(".exe") and executablePath.stem.lower() in ("3sd", "cartridgelauncher"):
+    if executablePath.name.lower().endswith(".exe") and executablePath.stem.lower() == "3sd":
         return "tray"
     return "ui"
 

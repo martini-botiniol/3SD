@@ -15,6 +15,7 @@ from cartridge_launcher.infrastructure.steam_store_search import SteamSearchResu
 from cartridge_launcher.infrastructure.startup_shortcut import disableStartup, enableStartup, isStartupEnabled
 from cartridge_launcher.infrastructure.windows_devices import WindowsDeviceScanner
 from cartridge_launcher.services.cartridge_creation_service import CartridgeCreationService
+from cartridge_launcher.services.cartridge_repair_service import CartridgeRepairService
 from cartridge_launcher.services.cartridge_session_service import CartridgeSessionService
 from cartridge_launcher.services.cartridge_update_service import CartridgeUpdateService
 from cartridge_launcher.services.cartridge_validator import CartridgeValidator
@@ -48,7 +49,7 @@ class LauncherWindow:
         self.logger = logger
         self.intervalMilliseconds = intervalMilliseconds
         self.suppressStatePopups = suppressStatePopups
-        self.coverCache = CoverCache(Path.cwd() / ".cartridge-launcher" / "covers")
+        self.coverCache = CoverCache(Path.home() / ".3sd" / "covers")
         self.currentState = self.sessionService.initialState()
         self.sidebarVisible = False
         self.libraryCards: tuple[LibraryCardViewModel, ...] = ()
@@ -73,7 +74,6 @@ class LauncherWindow:
         self.searchResultText = tk.StringVar(value="")
         self.stateTechnicalDetailText = tk.StringVar(value="")
         self.stateTechnicalVisible = False
-        self.optionsButtonText = tk.StringVar(value="Opciones")
         self.startupStatusText = tk.StringVar(value="")
         self.startupEnabledValue = tk.BooleanVar(value=False)
         self.deviceOptions: dict[str, str] = {}
@@ -115,6 +115,8 @@ class LauncherWindow:
         style.configure("Slot.TLabel", background="#151c21", foreground="#f4f7f5")
         style.configure("Card.TLabel", background="#20282f", foreground="#f4f7f5")
         style.configure("ActiveCard.TLabel", background="#1f3a31", foreground="#f4f7f5")
+        style.configure("Modern.TCombobox", fieldbackground="#20282f", background="#20282f", foreground="#f4f7f5", arrowcolor="#dce5e0", bordercolor="#34434c", lightcolor="#34434c", darkcolor="#34434c", padding=6)
+        style.map("Modern.TCombobox", fieldbackground=[("readonly", "#20282f")], foreground=[("readonly", "#f4f7f5")], selectbackground=[("readonly", "#26323a")], selectforeground=[("readonly", "#f4f7f5")])
 
     def _build(self) -> None:
         self.root.configure(bg="#0f1418")
@@ -129,7 +131,7 @@ class LauncherWindow:
         ttk.Label(header, text="Biblioteca de cartuchos", style="App.TLabel", font=("Segoe UI", 24, "bold")).grid(row=0, column=0, sticky="w")
         ttk.Label(header, text="Conecta un SSD y juega desde Steam como si fuera un cartucho.", style="Muted.TLabel").grid(row=1, column=0, sticky="w", pady=(4, 0))
         ModernButton(header, text="Ayuda", command=self._showHelp, background="#0f1418", width=94).grid(row=0, column=1, rowspan=2, sticky="e", padx=(0, 8))
-        ModernButton(header, textvariable=self.optionsButtonText, command=self._toggleSidebar, background="#0f1418", width=142).grid(row=0, column=2, rowspan=2, sticky="e")
+        ModernButton(header, text="☰", command=self._toggleSidebar, background="#0f1418", width=48, height=42).grid(row=0, column=2, rowspan=2, sticky="e")
 
         self.libraryFrame = ttk.Frame(self.shell, style="App.TFrame")
         self.libraryFrame.grid(row=1, column=0, sticky="nsew", padx=(0, 18))
@@ -206,14 +208,17 @@ class LauncherWindow:
         setupSection = self._addSidebarSection(1, "setup", "Seleccionar SSD y juego", "Elige el disco y el juego que usaras en las acciones de cartucho.")
         createSection = self._addSidebarSection(4, "create", "Crear cartucho", "Prepara un SSD nuevo con el juego seleccionado.")
         updateSection = self._addSidebarSection(7, "update", "Actualizar cartucho", "Reemplaza el juego asociado al SSD seleccionado.")
-        activeSection = self._addSidebarSection(10, "active", "Cartucho activo", "Acciones para el SSD conectado ahora.")
-        selectedSection = self._addSidebarSection(13, "selected", "Juego seleccionado", "Acciones para una portada elegida de la biblioteca.")
-        windowsSection = self._addSidebarSection(16, "windows", "Windows", "Configura como se comporta la app al iniciar.")
-        activitySection = self._addSidebarSection(19, "activity", "Actividad", "Eventos recientes del launcher.")
+        repairSection = self._addSidebarSection(10, "repair", "Reparar cartucho", "Reescribe metadata y firma para un SSD que no valida.")
+        activeSection = self._addSidebarSection(13, "active", "Cartucho activo", "Acciones para el SSD conectado ahora.")
+        selectedSection = self._addSidebarSection(16, "selected", "Juego seleccionado", "Acciones para una portada elegida de la biblioteca.")
+        windowsSection = self._addSidebarSection(19, "windows", "Windows", "Configura como se comporta la app al iniciar.")
+        activitySection = self._addSidebarSection(22, "activity", "Actividad", "Eventos recientes del launcher.")
         self._buildSetupSection(setupSection)
         ModernButton(createSection, text="Crear cartucho", command=self._createCartridge, variant="accent", background="#1a2228", width=244).grid(row=1, column=0, columnspan=2, sticky="we", pady=(10, 0))
         ModernButton(updateSection, text="Cambiar juego del cartucho", command=self._updateCartridge, variant="accent", background="#1a2228", width=244).grid(row=1, column=0, columnspan=2, sticky="we", pady=(10, 8))
         ttk.Label(updateSection, text="Para quitar el juego actual y poner otro, selecciona el SSD, elige el nuevo juego y usa Cambiar juego.", style="PanelMuted.TLabel", wraplength=260).grid(row=2, column=0, columnspan=2, sticky="we")
+        ModernButton(repairSection, text="Reparar cartucho", command=self._repairCartridge, variant="accent", background="#1a2228", width=244).grid(row=1, column=0, columnspan=2, sticky="we", pady=(10, 8))
+        ttk.Label(repairSection, text="Usalo si el SSD aparece como invalido. Repara manifest, firma, registro local y elimina metadata ejecutable dentro de .cartridge.", style="PanelMuted.TLabel", wraplength=260).grid(row=2, column=0, columnspan=2, sticky="we")
         self.openButton = ModernButton(activeSection, text="Abrir", command=lambda: self._runSteamAction("open"), background="#1a2228")
         self.openButton.grid(row=1, column=0, sticky="we", padx=(0, 6), pady=(10, 8))
         self.installButton = ModernButton(activeSection, text="Instalar", command=lambda: self._runSteamAction("install"), background="#1a2228")
@@ -234,25 +239,40 @@ class LauncherWindow:
         ttk.Label(windowsSection, textvariable=self.startupStatusText, style="PanelMuted.TLabel", wraplength=260).grid(row=2, column=0, columnspan=2, sticky="we", pady=(6, 0))
         self.activityLabel = ttk.Label(activitySection, text="Sin actividad reciente.", style="PanelMuted.TLabel", wraplength=260)
         self.activityLabel.grid(row=1, column=0, columnspan=2, sticky="we", pady=(10, 0))
-        ModernButton(self.sidebar, text="Actualizar biblioteca", command=self._refreshLibrary, background="#1a2228", width=244).grid(row=22, column=0, columnspan=2, sticky="we", pady=(22, 8))
-        ttk.Label(self.sidebar, textvariable=self.actionText, style="PanelMuted.TLabel", wraplength=260).grid(row=23, column=0, columnspan=2, sticky="we", pady=(10, 0))
+        ModernButton(self.sidebar, text="Actualizar biblioteca", command=self._refreshLibrary, background="#1a2228", width=244).grid(row=25, column=0, columnspan=2, sticky="we", pady=(22, 8))
+        ttk.Label(self.sidebar, textvariable=self.actionText, style="PanelMuted.TLabel", wraplength=260).grid(row=26, column=0, columnspan=2, sticky="we", pady=(10, 0))
 
     def _buildSetupSection(self, setupSection) -> None:
         ttk.Label(setupSection, text="Disco", style="Panel.TLabel").grid(row=1, column=0, sticky="w", pady=(10, 0))
-        self.deviceCombo = ttk.Combobox(setupSection, textvariable=self.selectedDeviceText, width=26, state="readonly")
+        self.deviceCombo = ttk.Combobox(setupSection, textvariable=self.selectedDeviceText, width=26, state="readonly", style="Modern.TCombobox")
         self.deviceCombo.grid(row=2, column=0, columnspan=2, sticky="we", pady=(4, 8))
         self.deviceCombo.bind("<<ComboboxSelected>>", lambda event: self._renderDeviceDetails())
         ModernButton(setupSection, text="Actualizar", command=self._refreshDevices, background="#1a2228").grid(row=3, column=0, sticky="we", padx=(0, 6), pady=(0, 10))
         ModernButton(setupSection, text="Detalles", command=self._toggleDeviceDetails, background="#1a2228").grid(row=3, column=1, sticky="we", pady=(0, 10))
         self.deviceDetailsLabel = ttk.Label(setupSection, textvariable=self.deviceDetailsText, style="PanelMuted.TLabel", wraplength=260)
         ttk.Label(setupSection, text="Nombre del juego", style="Panel.TLabel").grid(row=5, column=0, sticky="w")
-        ttk.Entry(setupSection, textvariable=self.createDisplayNameText, width=28).grid(row=6, column=0, columnspan=2, sticky="we", pady=(4, 10))
+        self._modernEntry(setupSection, self.createDisplayNameText).grid(row=6, column=0, columnspan=2, sticky="we", pady=(4, 10))
         ttk.Label(setupSection, text="Steam AppID", style="Panel.TLabel").grid(row=7, column=0, sticky="w")
-        ttk.Entry(setupSection, textvariable=self.createAppIdText, width=28).grid(row=8, column=0, columnspan=2, sticky="we", pady=(4, 12))
+        self._modernEntry(setupSection, self.createAppIdText).grid(row=8, column=0, columnspan=2, sticky="we", pady=(4, 12))
         ModernButton(setupSection, text="Buscar por nombre", command=self._searchSteamGame, background="#1a2228", width=244).grid(row=9, column=0, columnspan=2, sticky="we", pady=(0, 8))
-        self.searchCombo = ttk.Combobox(setupSection, textvariable=self.searchResultText, width=26, state="readonly")
+        self.searchCombo = ttk.Combobox(setupSection, textvariable=self.searchResultText, width=26, state="readonly", style="Modern.TCombobox")
         self.searchCombo.grid(row=10, column=0, columnspan=2, sticky="we", pady=(0, 8))
         self.searchCombo.bind("<<ComboboxSelected>>", lambda event: self._selectSteamSearchResult())
+
+    def _modernEntry(self, master, textvariable: tk.StringVar) -> tk.Entry:
+        return tk.Entry(
+            master,
+            textvariable=textvariable,
+            bg="#20282f",
+            fg="#f4f7f5",
+            insertbackground="#f4f7f5",
+            relief="flat",
+            bd=0,
+            highlightthickness=1,
+            highlightbackground="#34434c",
+            highlightcolor="#49b86f",
+            font=("Segoe UI", 10),
+        )
 
     def _addSidebarSection(self, row: int, key: str, title: str, description: str) -> ttk.Frame:
         labelText = tk.StringVar(value=f"[+] {title}")
@@ -284,10 +304,8 @@ class LauncherWindow:
     def _toggleSidebar(self) -> None:
         if self.sidebarVisible:
             self.sidebarContainer.grid_remove()
-            self.optionsButtonText.set("Opciones")
         else:
             self.sidebarContainer.grid(row=1, column=1, sticky="nsew")
-            self.optionsButtonText.set("Ocultar opciones")
         self.sidebarVisible = not self.sidebarVisible
 
     def _showHelp(self) -> None:
@@ -621,6 +639,20 @@ class LauncherWindow:
             manifest = CartridgeUpdateService(self.security, self.registry, self.deviceScanner).update(Path(rootPath), self.createDisplayNameText.get(), self.createAppIdText.get())
             self.actionText.set(f"Juego cambiado: {manifest.displayName}")
             self._refreshLibrary()
+        except CartridgeError as exc:
+            friendly = friendlyErrorFromCode(exc.code)
+            self.actionText.set(f"{friendly.title}: {friendly.message}")
+
+    def _repairCartridge(self) -> None:
+        rootPath = self.deviceOptions.get(self.selectedDeviceText.get())
+        if rootPath is None:
+            self.actionText.set("Selecciona un SSD.")
+            return
+        try:
+            manifest = CartridgeRepairService(self.security, self.registry, self.deviceScanner).repair(Path(rootPath), self.createDisplayNameText.get(), self.createAppIdText.get())
+            self.actionText.set(f"Cartucho reparado: {manifest.displayName}")
+            self._refreshLibrary()
+            self._scanExisting()
         except CartridgeError as exc:
             friendly = friendlyErrorFromCode(exc.code)
             self.actionText.set(f"{friendly.title}: {friendly.message}")

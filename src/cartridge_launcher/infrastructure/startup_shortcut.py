@@ -10,7 +10,7 @@ def startupShortcutPath() -> Path:
 
 def startupCommand() -> list[str]:
     executable = Path(sys.executable)
-    if executable.name.lower() in ("3sd.exe", "cartridgelauncher.exe"):
+    if executable.name.lower() == "3sd.exe":
         return [str(executable), "tray", "--steam-action", "open"]
     return [str(executable), "-m", "cartridge_launcher.app.main", "tray", "--steam-action", "open"]
 

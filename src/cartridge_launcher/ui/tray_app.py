@@ -133,7 +133,7 @@ class TrayApp:
 
     def _uiCommand(self) -> list[str]:
         executablePath = Path(sys.executable)
-        if executablePath.name.lower().endswith(".exe") and executablePath.stem.lower() in ("3sd", "cartridgelauncher"):
+        if executablePath.name.lower().endswith(".exe") and executablePath.stem.lower() == "3sd":
             return [str(executablePath), "ui", "--from-tray"]
         return [str(executablePath), "-m", "cartridge_launcher.app.main", "ui", "--from-tray"]
 
@@ -238,7 +238,7 @@ class TrayApp:
                 continue
             messageKey = message.key or f"{message.title}:{message.message}"
             self.queuedStatusPopupKeys.discard(messageKey)
-            if messageKey in self.displayedStatusPopupKeys:
+            if messageKey in self.displayedStatusPopupKeys and not messageKey.startswith("NOT_INSERTED:"):
                 continue
             self.displayedStatusPopupKeys.add(messageKey)
             self.lastStatusPopupKey = messageKey
@@ -268,6 +268,7 @@ class TrayApp:
                 self._queueStatusPopup(statusMessage)
             if state.state == LauncherState.NOT_INSERTED:
                 self.readyNotificationCartridgeId = None
+                self._notifyRemoved(state)
             if state.state == LauncherState.READY:
                 if notifyReady:
                     self._notifyReady(state)
@@ -279,6 +280,11 @@ class TrayApp:
             return
         self.readyNotificationCartridgeId = state.cartridgeId
         self._notify("Cartucho insertado", f"{state.manifest.displayName} detectado.")
+
+    def _notifyRemoved(self, state: AppState) -> None:
+        if state.rootPath is None:
+            return
+        self._notify("Cartucho expulsado", f"El SSD cartucho fue expulsado.\n{state.rootPath}")
 
     def _maybeRunSteamAction(self, state: AppState) -> None:
         if self.steamAction == "none" or state.manifest is None or not self.sessionService.shouldRunSteamAction(state):
@@ -326,7 +332,7 @@ class TrayApp:
 
     def _queueStatusPopup(self, message: StatusPopupMessage) -> None:
         messageKey = message.key or f"{message.title}:{message.message}"
-        if messageKey in self.displayedStatusPopupKeys or messageKey in self.queuedStatusPopupKeys:
+        if not messageKey.startswith("NOT_INSERTED:") and (messageKey in self.displayedStatusPopupKeys or messageKey in self.queuedStatusPopupKeys):
             return
         self.queuedStatusPopupKeys.add(messageKey)
         self.statusMessages.put(message)
@@ -378,7 +384,7 @@ def loadPystray():
 
 def isPackagedExecutable() -> bool:
     executablePath = Path(sys.executable)
-    return executablePath.name.lower().endswith(".exe") and executablePath.stem.lower() in ("3sd", "cartridgelauncher")
+    return executablePath.name.lower().endswith(".exe") and executablePath.stem.lower() == "3sd"
 
 
 def killPackagedProcesses() -> None:
@@ -400,5 +406,5 @@ def packagedKillCommand() -> list[str]:
         "-ExecutionPolicy",
         "Bypass",
         "-Command",
-        "Get-Process -Name '3SD','CartridgeLauncher' -ErrorAction SilentlyContinue | Stop-Process -Force",
+        "Get-Process -Name '3SD' -ErrorAction SilentlyContinue | Stop-Process -Force",
     ]

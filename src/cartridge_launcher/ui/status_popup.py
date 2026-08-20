@@ -24,7 +24,7 @@ class StatusPopup:
         messageKey = message.key or f"{message.title}:{message.message}"
         if self.window is not None and self.window.winfo_exists() and self.activeKey == messageKey:
             return
-        if message.key and not message.key.startswith("steam:action:") and not shouldShowPopupKey(message.key):
+        if message.key and not message.key.startswith(("steam:action:", "NOT_INSERTED:")) and not shouldShowPopupKey(message.key):
             return
 
         if self.window is None or not self.window.winfo_exists():
