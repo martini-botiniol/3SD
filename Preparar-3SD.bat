@@ -1,33 +1,20 @@
 @echo off
 setlocal
-
-set "PROJECT_ROOT=%~dp0"
-set "INSTALL_DIR=%LOCALAPPDATA%\Programs\3SD"
-
-net session >nul 2>&1
-if not "%ERRORLEVEL%"=="0" (
-  echo Solicitando permisos de administrador para confiar la firma local...
-  powershell.exe -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
-  exit /b 0
-)
-
-echo.
-echo 3SD
-echo ===
-echo.
-echo Este proceso va a cerrar instancias antiguas, crear el .exe, firmarlo,
-echo preparar el paquete local e instalar o actualizar la aplicacion en esta PC.
-echo Tambien desbloquea el ejecutable e instala la confianza local necesaria.
-echo.
-
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PROJECT_ROOT%scripts\prepare_3sd.ps1" -InstallDirectory "%INSTALL_DIR%"
-
-set "RESULT=%ERRORLEVEL%"
-if "%RESULT%"=="0" (
-  echo 3SD quedo listo para usar.
-  echo Abre la app desde el escritorio o el menu inicio.
+if defined THREE_SD_PYTHON (
+  "%THREE_SD_PYTHON%" "%~dp0scripts\prepare_3sd.py" %*
 ) else (
-  echo No se pudo preparar 3SD. Codigo: %RESULT%
-  pause
+  where py >nul 2>&1
+  if not errorlevel 1 (
+    py -3 "%~dp0scripts\prepare_3sd.py" %*
+  ) else (
+    python "%~dp0scripts\prepare_3sd.py" %*
+  )
 )
-exit /b %RESULT%
+if errorlevel 1 (
+  echo No se pudo preparar 3SD. Revisa el error anterior.
+  echo Se requiere Python 3.11 o superior con Tcl/Tk y pip.
+  echo Puedes definir THREE_SD_PYTHON con la ruta a python.exe.
+  pause
+  exit /b 1
+)
+echo 3SD listo. Usa el acceso directo del escritorio o Abrir-3SD.bat.

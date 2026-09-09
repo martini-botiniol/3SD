@@ -7,12 +7,8 @@ from cartridge_launcher.app.main import defaultCommand, main, requiresSingleInst
 
 
 class AppMainTests(unittest.TestCase):
-    def testSourceDefaultCommandOpensUi(self) -> None:
-        self.assertEqual(defaultCommand(), "ui")
-
-    def testPackagedExecutableDefaultCommandStartsTray(self) -> None:
-        with patch("sys.executable", "C:\\Program Files\\3SD\\3SD.exe"):
-            self.assertEqual(defaultCommand(), "tray")
+    def testDefaultCommandStartsResidentTray(self) -> None:
+        self.assertEqual(defaultCommand(), "tray")
 
     def testTrayRequiresSingleInstance(self) -> None:
         self.assertTrue(requiresSingleInstance("tray"))
@@ -28,10 +24,23 @@ class AppMainTests(unittest.TestCase):
         with patch("cartridge_launcher.app.main.SingleInstanceLock") as lockClass, patch("cartridge_launcher.app.main.SingleInstanceSignal") as signalClass:
             lockClass.return_value.acquire.return_value = False
 
-            result = main(["tray"])
+            result = main(["tray", "--open-window"])
 
         self.assertEqual(result, 0)
         signalClass.return_value.signalExisting.assert_called_once()
+
+    def testRepeatedStartupDoesNotOpenLibrary(self) -> None:
+        with patch("cartridge_launcher.app.main.SingleInstanceLock") as lockClass, patch("cartridge_launcher.app.main.SingleInstanceSignal") as signalClass:
+            lockClass.return_value.acquire.return_value = False
+            self.assertEqual(main(["tray"]), 0)
+        signalClass.return_value.signalExisting.assert_not_called()
+
+    def testNoArgumentsStartsTrayAndLibrary(self) -> None:
+        with patch("cartridge_launcher.app.main.SingleInstanceLock"), patch("cartridge_launcher.app.main.services") as services, patch("cartridge_launcher.app.main.TrayApp") as tray:
+            services.return_value = ("security", "registry", "scanner", "logger")
+            self.assertEqual(main([]), 0)
+        self.assertTrue(tray.call_args.kwargs["openWindowOnStart"])
+        tray.return_value.run.assert_called_once()
 
     def testUiFromTrayOpensWithoutTakingSingleInstanceLock(self) -> None:
         with patch("cartridge_launcher.app.main.SingleInstanceLock") as lockClass, patch("cartridge_launcher.app.main.services") as services, patch("cartridge_launcher.app.main.runLauncherUi") as runLauncherUi:

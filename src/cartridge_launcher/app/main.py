@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 from cartridge_launcher.infrastructure.logging_config import configureLogging
@@ -60,12 +59,15 @@ def services():
 
 def main(argv: list[str] | None = None) -> int:
     args = buildParser().parse_args(argv)
+    if args.command is None:
+        args = buildParser().parse_args(["tray", "--open-window"])
     command = args.command or defaultCommand()
     lock: SingleInstanceLock | None = None
     if requiresSingleInstance(command, args):
         lock = SingleInstanceLock(defaultDataDirectory() / "3sd.lock")
         if not lock.acquire():
-            SingleInstanceSignal().signalExisting()
+            if command != "tray" or args.open_window:
+                SingleInstanceSignal().signalExisting()
             return 0
 
     security, registry, scanner, logger = services()
@@ -104,11 +106,12 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def defaultCommand() -> str:
-    executablePath = Path(sys.executable)
-    if executablePath.name.lower().endswith(".exe") and executablePath.stem.lower() == "3sd":
-        return "tray"
-    return "ui"
+    return "tray"
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except Exception:
+        configureLogging(defaultDataDirectory() / "launcher.log").exception("No se pudo iniciar 3SD")
+        raise
