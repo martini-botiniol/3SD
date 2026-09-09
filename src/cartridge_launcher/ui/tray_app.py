@@ -65,6 +65,7 @@ class TrayApp:
         self.libraryProcess: subprocess.Popen | None = None
         self.readyNotificationCartridgeId: str | None = None
         self.lastStatusPopupKey: str | None = None
+        self.removalPopupUntil = 0.0
         self.queuedStatusPopupKeys: set[str] = set()
         self.displayedStatusPopupKeys: set[str] = set()
         self.statusMessages: queue.Queue[StatusPopupMessage] = queue.Queue()
@@ -247,6 +248,10 @@ class TrayApp:
         suppressed = OperationWindowGate.isActive()
         if suppressed:
             self.statusPopup.dismiss()
+            self.removalPopupUntil = 0.0
+        elif time.monotonic() < getattr(self, "removalPopupUntil", 0.0):
+            # Let the removal notice remain readable before showing the next event.
+            return
         while True:
             try:
                 message = self.statusMessages.get_nowait()
@@ -265,6 +270,9 @@ class TrayApp:
             self.displayedStatusPopupKeys.add(messageKey)
             self.lastStatusPopupKey = messageKey
             self.statusPopup.show(message)
+            if messageKey.startswith("NOT_INSERTED:"):
+                self.removalPopupUntil = time.monotonic() + (message.dismissAfterMilliseconds or 3000) / 1000
+                return
 
     def _scanExisting(self, allowSteamAction: bool = True, showStatePopups: bool = True, notifyReady: bool = True) -> None:
         self._handleStates(
@@ -288,7 +296,13 @@ class TrayApp:
             self.currentState = state
             statusMessage = statusPopupMessageFromState(state)
             popupKey = statusPopupKeyFromState(state)
-            if showStatePopups and not willRunSteamAction and statusMessage is not None and popupKey is not None and popupKey != self.lastStatusPopupKey and not self.libraryOpen:
+            isRemoval = state.state == LauncherState.NOT_INSERTED and state.rootPath is not None
+            # The tray owns removal popups even with its library open (--from-tray).
+            # Removal events repeat across sessions and must survive auto-launch of
+            # the next waiting cartridge in the same batch of states.
+            if showStatePopups and statusMessage is not None and popupKey is not None and (
+                isRemoval or (not willRunSteamAction and popupKey != self.lastStatusPopupKey and not self.libraryOpen)
+            ):
                 self._queueStatusPopup(statusMessage)
             if state.state == LauncherState.NOT_INSERTED:
                 self.readyNotificationCartridgeId = None
