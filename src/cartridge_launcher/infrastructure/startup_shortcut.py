@@ -1,40 +1,55 @@
 from __future__ import annotations
 
 import sys
+import os
+import subprocess
 from pathlib import Path
 
 
 def startupShortcutPath() -> Path:
-    return Path.home() / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup" / "3SD.lnk"
+    from win32com.shell import shell, shellcon
+
+    return Path(shell.SHGetFolderPath(0, shellcon.CSIDL_STARTUP, None, 0)) / "3SD.lnk"
+
+
+def windowPython() -> Path:
+    executable = Path(sys.executable)
+    candidate = executable.with_name("pythonw.exe")
+    return candidate if os.name == "nt" and candidate.is_file() else executable
 
 
 def startupCommand() -> list[str]:
-    executable = Path(sys.executable)
-    if executable.name.lower() == "3sd.exe":
-        return [str(executable), "tray", "--steam-action", "open"]
-    return [str(executable), "-m", "cartridge_launcher.app.main", "tray", "--steam-action", "open"]
+    return [str(windowPython()), "-I", "-m", "cartridge_launcher.app.main", "tray", "--steam-action", "open"]
 
 
 def isStartupEnabled() -> bool:
-    return startupShortcutPath().is_file()
+    path = startupShortcutPath()
+    if not path.is_file():
+        return False
+    try:
+        import win32com.client
+
+        shortcut = win32com.client.Dispatch("WScript.Shell").CreateShortcut(str(path))
+        return Path(shortcut.TargetPath).is_file() and "tray" in shortcut.Arguments
+    except Exception:
+        return False
+
+
+def createShortcut(path: Path, command: list[str], workingDirectory: Path) -> None:
+    import win32com.client
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    shortcut = win32com.client.Dispatch("WScript.Shell").CreateShortcut(str(path))
+    shortcut.TargetPath = command[0]
+    shortcut.Arguments = subprocess.list2cmdline(command[1:])
+    shortcut.WorkingDirectory = str(workingDirectory)
+    shortcut.IconLocation = command[0]
+    shortcut.Save()
 
 
 def enableStartup() -> Path:
     path = startupShortcutPath()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        import win32com.client
-
-        shell = win32com.client.Dispatch("WScript.Shell")
-        shortcut = shell.CreateShortcut(str(path))
-        command = startupCommand()
-        shortcut.TargetPath = command[0]
-        shortcut.Arguments = " ".join(command[1:])
-        shortcut.WorkingDirectory = str(Path(command[0]).parent)
-        shortcut.IconLocation = command[0]
-        shortcut.Save()
-    except Exception:
-        path.write_text(" ".join(startupCommand()), encoding="utf-8")
+    createShortcut(path, startupCommand(), Path(sys.executable).parent)
     return path
 
 

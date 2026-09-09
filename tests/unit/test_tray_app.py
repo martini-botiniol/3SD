@@ -8,19 +8,12 @@ from PIL import Image
 from cartridge_launcher.app.state import AppState
 from cartridge_launcher.domain.models import CartridgeManifest
 from cartridge_launcher.domain.states import LauncherState
-from cartridge_launcher.ui.tray_app import TrayApp, createTrayIcon, killPackagedProcesses, packagedKillCommand
+from cartridge_launcher.ui.tray_app import TrayApp, createTrayIcon
 
 
 class TrayAppTests(unittest.TestCase):
     def testCreateTrayIconReturnsPillowImage(self) -> None:
         self.assertIsInstance(createTrayIcon(), Image.Image)
-
-    def testPackagedKillUsesDetachedProcess(self) -> None:
-        with patch("cartridge_launcher.ui.tray_app.isPackagedExecutable", return_value=True), patch("subprocess.Popen") as popen:
-            killPackagedProcesses()
-
-        popen.assert_called_once()
-        self.assertEqual(popen.call_args.args[0], packagedKillCommand())
 
     def testUiCommandMarksWindowAsLaunchedFromTray(self) -> None:
         app = object.__new__(TrayApp)

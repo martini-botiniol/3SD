@@ -32,7 +32,7 @@ Estado actual:
 - Deteccion de discos por polling.
 - Validacion de `.cartridge/manifest.json` con firma HMAC-SHA256.
 - Acciones Steam: abrir, instalar y modo automatico.
-- Firma local de desarrollo para builds `.exe`.
+- Distribucion Python para pruebas internas, sin certificados locales.
 - Inicio con Windows configurable desde la UI.
 
 ## Uso
@@ -40,7 +40,7 @@ Estado actual:
 Instalar dependencias para desarrollo:
 
 ```powershell
-py -m pip install -e ".[build,dev]"
+py -m pip install -e ".[dev]"
 ```
 
 Abrir la ventana principal:
@@ -61,7 +61,7 @@ Ejecutar pruebas:
 py -m pytest
 ```
 
-Al abrir el `.exe` sin argumentos, la app inicia el tray y abre la biblioteca.
+Al usar el acceso directo o `Abrir-3SD.bat`, la app inicia el tray y abre la biblioteca.
 Desde el tray se puede abrir la biblioteca, escanear cartuchos ya conectados o
 salir completamente del proceso.
 
@@ -238,56 +238,94 @@ El secreto local vive en:
 El secreto no se copia al SSD. En V1, los cartuchos son confiables solo en la
 PC que los creo.
 
-## Build, Firma E Instalacion
+## Preparacion, Actualizacion E Inicio Automatico
 
-Preparar, firmar, empaquetar e instalar en esta PC:
+Requisitos: Windows, Python 3.11 o superior con Tcl/Tk, pip y venv, e internet
+para descargar dependencias. La distribucion de pruebas fija Pillow, pystray,
+pywin32 y six. No requiere certificados ni administrador en el uso diario.
+La ejecucion con Python no garantiza superar todas las politicas de cada equipo.
+
+Extrae el ZIP y ejecuta `Preparar-3SD.bat`. Si el interprete no esta en PATH,
+define `THREE_SD_PYTHON` con su ruta completa. Tambien puedes ejecutar:
 
 ```powershell
-.\Preparar-3SD.bat
+python scripts/prepare_3sd.py
 ```
 
-El `.bat` es un lanzador corto que eleva permisos y ejecuta el flujo completo en
-un solo script:
+La ubicacion predeterminada es `%LOCALAPPDATA%\Programs\3SD`. Para pruebas
+tecnicas existe `--install-directory`; los lanzadores del ZIP usan la ubicacion
+predeterminada, por lo que con una ruta personalizada debes usar sus accesos directos.
+
+Cada preparacion crea un entorno en `runtimes/<identificador>` en su ubicacion
+definitiva. Instala una wheel, comprueba dependencias, Tkinter y el backend de la
+bandeja, y solo entonces publica accesos directos y `installation.json`.
+No depende del checkout ni de una instalacion editable. No copies entornos virtuales
+entre equipos y no desinstales o muevas el Python base usado para prepararlos.
+
+Puedes borrar la carpeta extraida. Para actualizar, extrae el ZIP nuevo y repite
+la preparacion. Sal de la bandeja antes de empezar a usar la nueva version.
+La version anterior permanece en disco; una preparacion fallida no cambia los
+accesos de la version activa. Los entornos fallidos incluyen `failed.json`.
+No se eliminan automaticamente entornos antiguos para conservar la recuperacion.
+
+El inicio automatico usa un acceso directo en la carpeta Inicio del usuario.
+Se activa en una instalacion nueva, conserva la configuracion al migrar y respeta
+la desactivacion en actualizaciones. Puedes cambiarlo en Opciones o con los
+comandos `startup enable`, `startup disable` y `startup status`, ejecutados con
+el Python de la instalacion.
+
+Tras reinicio, apagado/encendido o cierre de sesion, 3SD vuelve a ejecutarse
+**al iniciar sesion**, en la bandeja, sin consola ni biblioteca abierta. Detecta
+SSD ya conectados y conserva las acciones Steam existentes. No es un servicio
+previo al inicio de sesion. Cerrar la biblioteca mantiene el tray; `Exit` termina
+la aplicacion hasta su proxima apertura o inicio de sesion.
+
+## Limpieza Del Flujo Anterior
+
+Ejecuta primero la preparacion Python. La limpieza esta separada y no se ejecuta
+cada vez que se prepara la aplicacion. Inventario sin cambios:
 
 ```powershell
-.\scripts\prepare_3sd.ps1
+powershell -NoProfile -ExecutionPolicy RemoteSigned -File scripts/cleanup_legacy.ps1
 ```
 
-Ese flujo crea `dist\3SD.exe`, exporta `dist\3SD-LocalDev.cer`, prepara
-`dist\3SD-local-dev\` e instala en:
+La politica indicada se limita a ese proceso de PowerShell; no cambia la configuracion persistente de Windows. Para aplicar, agrega `-Apply`. Para incluir los artefactos del checkout, agrega
+`-ProjectDirectory` con su ruta completa. El script se copia tambien a la carpeta
+instalada, por lo que no depende de conservar el ZIP.
 
-```text
-%LOCALAPPDATA%\Programs\3SD
-```
+Solo identifica certificados `CN=3SD Local Dev`, autofirmados y con uso de firma
+de codigo, corroborados por las firmas o certificados exportados de 3SD. Si no
+quedan esos archivos, deja los certificados pendientes; tras verificar el inventario
+puede pasarse una huella exacta mediante `-Thumbprint`. Nunca busca nombres parciales.
 
-Antes de ejecutar `Preparar-3SD.bat`, Python debe estar disponible como `py` o
-`python` en PATH. Si el build falla con `Python was not found`, instala Python
-para Windows o ejecuta `prepare_3sd.ps1` manualmente pasando `-PythonExe` con
-la ruta completa a `python.exe`.
+Retira las copias identificadas en los almacenes de usuario y equipo y las claves
+privadas asociadas si existen. La limpieza de LocalMachine requiere ejecutar este
+paso en PowerShell como administrador, conservando el usuario y la ruta de instalacion
+originales. No modifica las protecciones de Windows ni instala certificados.
 
-Smart App Control puede bloquear ejecutables locales sin reputacion publica.
-La firma self-signed y la confianza local ayudan en la PC de desarrollo, pero
-no crean reputacion publica. Si `prepare_3sd.ps1` detecta que Windows bloquea
-`3SD.exe`, deja los accesos directos configurados para abrir 3SD via Python en
-vez de lanzar el `.exe` directamente y reporta `Modo de acceso directo: python`.
+Antes de borrar verifica la instalacion Python y guarda un inventario; despues
+registra el resultado de cada elemento en `legacy-cleanup-report.json`. Los fallos
+de permisos o archivos en uso quedan pendientes (codigo de salida 2). Cierra el
+3SD anterior desde su bandeja y repite el paso si su EXE sigue en uso.
 
-Ese modo es un fallback local/de desarrollo. Depende de que Python siga
-disponible en la PC y de que el paquete este instalado desde este checkout con
-`pip install -e`. En ese caso usa el acceso directo de escritorio/menu inicio;
-abrir `3SD.exe` manualmente puede seguir mostrando el bloqueo de Smart App
-Control.
+Se conservan `%USERPROFILE%\.3sd`, `launcher.secret`, el registro y todos los SSD.
+Las firmas HMAC de cartuchos son independientes de los certificados de Windows.
+La portabilidad de cartuchos entre PCs no forma parte de esta migracion.
 
-Un instalador final publico no deberia depender del checkout local ni de una
-instalacion editable de Python. Para publicar una version distribuible, la ruta
-preferida es un binario o instalador firmado con reputacion suficiente para no
-necesitar este fallback.
+## Retirar La Distribucion De Pruebas
+
+Desactiva `Iniciar con Windows`, sal de 3SD y elimina sus accesos directos de
+escritorio/menu Inicio. Elimina exclusivamente `%LOCALAPPDATA%\Programs\3SD`
+despues de confirmar que es la carpeta de esta instalacion. Los datos y el secreto
+en `%USERPROFILE%\.3sd` permanecen para futuras instalaciones. Python puede
+seguir siendo utilizado por otras aplicaciones y no se desinstala con 3SD.
 
 ## Troubleshooting
 
 `No module named PIL`:
 
 ```powershell
-py -m pip install -e ".[build,dev]"
+py -m pip install -e ".[dev]"
 ```
 
 `No module named tkinter`: instala Python desde python.org con `tcl/tk and
@@ -297,26 +335,10 @@ IDLE`, reinstala dependencias y prueba:
 py -c "import tkinter; root = tkinter.Tk(); root.destroy(); print('tk ok')"
 ```
 
-Smart App Control bloquea el `.exe`:
-
-```powershell
-.\Preparar-3SD.bat
-```
-
-Si al terminar muestra `Modo de acceso directo: python`, abre 3SD desde el
-acceso directo generado, no ejecutando `3SD.exe` directamente.
-
-El tray no cierra:
-
-```powershell
-taskkill /F /IM 3SD.exe /T
-```
-
-Luego reconstruye:
-
-```powershell
-.\Preparar-3SD.bat
-```
+La aplicacion no inicia o falta una dependencia: ejecuta `Diagnosticar-3SD.bat`.
+Usa `Diagnosticar-3SD.bat --run` para conservar una consola durante el arranque.
+Repite la preparacion para reparar; revisa `launcher.log` y cualquier error de
+politica de Windows por separado.
 
 La portada dice `Juego sin nombre`: conecta el cartucho y espera `READY`, usa
 `Actualizar cartucho` o ejecuta `update` desde CLI.

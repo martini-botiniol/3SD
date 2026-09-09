@@ -14,7 +14,7 @@ binarios desde el SSD.
 - Deteccion de discos por polling.
 - Validacion de `.cartridge/manifest.json` con firma HMAC-SHA256.
 - Acciones Steam: abrir, instalar y modo automatico.
-- Firma local de desarrollo para builds `.exe`.
+- Distribucion de pruebas con Python y entorno virtual por usuario.
 - Inicio con Windows configurable desde la UI.
 
 ## Inicio Rapido
@@ -22,7 +22,7 @@ binarios desde el SSD.
 Instalar dependencias:
 
 ```powershell
-py -m pip install -e ".[build,dev]"
+py -m pip install -e ".[dev]"
 ```
 
 Abrir la ventana principal:
@@ -55,19 +55,39 @@ Ejecutar pruebas:
 py -m pytest
 ```
 
-## Instalador Local
+## Distribucion Python para pruebas
 
-Preparar, firmar, empaquetar e instalar en esta PC:
+En Windows, instala Python 3.11 o superior con **Tcl/Tk, pip y venv**.
+La preparacion inicial necesita internet. No se instala Python automaticamente.
+
+1. Extrae el ZIP completo en una carpeta.
+2. Ejecuta `Preparar-3SD.bat` (sin administrador).
+3. Usa el acceso directo de 3SD o `Abrir-3SD.bat`.
+
+La aplicacion se instala en `%LOCALAPPDATA%\Programs\3SD`, con su propio
+entorno virtual. Puedes eliminar la carpeta extraida cuando termine.
+Python debe permanecer instalado; no uses un interprete temporal o del repositorio.
+Si no se encuentra Python, define `THREE_SD_PYTHON` con la ruta a `python.exe`.
+
+3SD vuelve a la bandeja al iniciar sesion despues de reiniciar o apagar/encender
+Windows. `Iniciar con Windows` se activa en instalaciones nuevas; las actualizaciones
+conservan tu preferencia. Cerrar la biblioteca no cierra la bandeja; `Exit` si.
+
+Repite `Preparar-3SD.bat` para actualizar o reparar. Si ya estaba abierto, sal
+desde la bandeja y vuelve a abrirlo. Una preparacion fallida conserva la version anterior.
+
+Para revisar errores, usa `Diagnosticar-3SD.bat`; agrega `--run` para abrir con
+consola. El registro esta en `%USERPROFILE%\.3sd\launcher.log`.
+
+Crear el ZIP desde el entorno de desarrollo:
 
 ```powershell
-.\Preparar-3SD.bat
+python -m pip install -e ".[dev]"
+python scripts/package_3sd.py
 ```
 
-El flujo local instala en:
-
-```text
-%LOCALAPPDATA%\Programs\3SD
-```
+El ZIP se genera en `dist`. Contiene una wheel de 3SD, scripts y documentacion;
+las dependencias de ejecucion tienen versiones fijadas. MSIX queda para otra etapa.
 
 ## Documentacion
 

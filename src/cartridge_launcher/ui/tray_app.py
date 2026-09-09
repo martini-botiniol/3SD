@@ -44,7 +44,7 @@ class TrayApp:
         self.steamActionPopupMinimumSeconds = 2
         self.openWindowOnStart = openWindowOnStart
         self.exitProcess = exitProcess or os._exit
-        self.killProcessGroup = killProcessGroup or killPackagedProcesses
+        self.killProcessGroup = killProcessGroup or (lambda: None)
         self.monitor = DeviceMonitor(deviceScanner)
         self.steamIntegration = SteamIntegration(SteamClient())
         self.runtimeStatusStore = defaultRuntimeStatusStore()
@@ -133,8 +133,6 @@ class TrayApp:
 
     def _uiCommand(self) -> list[str]:
         executablePath = Path(sys.executable)
-        if executablePath.name.lower().endswith(".exe") and executablePath.stem.lower() == "3sd":
-            return [str(executablePath), "ui", "--from-tray"]
         return [str(executablePath), "-m", "cartridge_launcher.app.main", "ui", "--from-tray"]
 
     def _menu(self):
@@ -378,33 +376,5 @@ def loadPystray():
     try:
         import pystray
     except ModuleNotFoundError as exc:
-        raise RuntimeError("pystray is required for tray mode. Run: py -m pip install -e .") from exc
+        raise RuntimeError("Falta pystray. Ejecuta Preparar-3SD.bat para reparar la instalacion.") from exc
     return pystray
-
-
-def isPackagedExecutable() -> bool:
-    executablePath = Path(sys.executable)
-    return executablePath.name.lower().endswith(".exe") and executablePath.stem.lower() == "3sd"
-
-
-def killPackagedProcesses() -> None:
-    if not isPackagedExecutable():
-        return
-    subprocess.Popen(
-        packagedKillCommand(),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
-    )
-
-
-def packagedKillCommand() -> list[str]:
-    return [
-        "powershell.exe",
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        "Get-Process -Name '3SD' -ErrorAction SilentlyContinue | Stop-Process -Force",
-    ]
