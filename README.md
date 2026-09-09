@@ -1,94 +1,76 @@
-# 3SD
+# 3SD 0.2
 
-Prototipo Windows + Steam para usar SSDs extraibles como cartuchos fisicos.
+Aplicación Windows que convierte SSD extraíbles en cartuchos portátiles para Steam.
+Conecta un cartucho: 3SD lo valida, lo registra localmente y solicita a Steam abrir
+el juego o completar su instalación. No necesita una PC creadora ni un servicio central.
+Steam conserva el control de cuentas, licencias, descargas y ejecución.
 
-3SD valida un manifiesto firmado dentro del SSD, registra cartuchos en la PC
-local y abre o instala juegos mediante URLs oficiales de Steam. Nunca ejecuta
-binarios desde el SSD.
+## Uso entre amigos
 
-## Estado Actual
+1. Instala 3SD y Steam en cada PC.
+2. Crea el cartucho desde Opciones > Crear cartucho.
+3. En cada PC, si Steam lo solicita, añade la carpeta `SteamLibrary` del SSD en
+   Steam > Parámetros > Almacenamiento. Selecciona esa biblioteca al instalar.
+4. Después basta conectar el cartucho con 3SD abierto en la bandeja.
+5. Para cartuchos antiguos, selecciona el disco y pulsa **Preparar para usar en
+   cualquier PC** una sola vez. La firma antigua puede no ser verificable allí;
+   la conversión es una aceptación explícita y conserva respaldo.
 
-- UI principal con biblioteca de portadas.
-- Tray app residente.
-- Creacion y actualizacion de cartuchos.
-- Deteccion de discos por polling.
-- Validacion de `.cartridge/manifest.json` con firma HMAC-SHA256.
-- Acciones Steam: abrir, instalar y modo automatico.
-- Distribucion de pruebas con Python y entorno virtual por usuario.
-- Inicio con Windows configurable desde la UI.
+Antes de retirar físicamente el SSD, termina juegos y descargas que lo utilicen.
+3SD cancela sus esperas al desconectar, pero no cierra juegos a la fuerza.
 
-## Inicio Rapido
+## Paquete autónomo Windows
 
-Instalar dependencias:
+Extrae completo `3SD-0.2.0-windows-x64.zip`. Conserva `3SD.exe` junto a `_internal`.
+Puedes abrir `3SD.exe` o ejecutar `Instalar-3SD.bat` para crear accesos directos.
+El paquete incluye Python/Tk y dependencias: no requiere instalar Python ni usar
+el checkout. Las actualizaciones conservan la generación anterior y la preferencia
+actual de inicio con Windows. El binario local no tiene firma comercial; las
+políticas de Windows pueden impedir su ejecución.
 
-```powershell
-py -m pip install -e ".[dev]"
-```
+Desde el menú Inicio, **Desinstalar 3SD** retira los accesos y el inicio automático.
+Después de cerrar la bandeja, elimina la carpeta de instalación indicada para
+liberar espacio. La biblioteca de usuario y los SSD se conservan.
 
-Abrir la ventana principal:
-
-```powershell
-3sd ui
-```
-
-Iniciar en modo tray:
-
-```powershell
-3sd tray --open-window --steam-action auto
-```
-
-Crear cartucho desde CLI:
+## Desarrollo
 
 ```powershell
-3sd create --root G:\ --display-name "The Last of Us Part II Remastered" --app-id 2531310
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev,build]"
+.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m cartridge_launcher.app.main tray --open-window
+.\.venv\Scripts\python.exe scripts/package_standalone.py
 ```
 
-Reparar cartucho desde CLI:
+El build requiere un Python Windows con Tcl/Tk completo. Ejecuta pruebas, construye
+el paquete y verifica su comando `self-check` antes de crear el ZIP. Las versiones
+de ejecución y construcción están fijadas; el paquete conserva un inventario del
+entorno. No se promete identidad binaria byte por byte entre builds.
+
+## Distribución Python existente
+
+Se conserva `Preparar-3SD.bat` y `scripts/package_3sd.py` para pruebas internas.
+Esta alternativa necesita Python 3.11+ con Tcl/Tk, pip, venv e internet durante
+la preparación. Instala una wheel en un entorno versionado por usuario, sin
+instalación editable. Python debe permanecer disponible. Para actualizar,
+repite la preparación y reinicia 3SD desde la bandeja.
+
+## Consola
 
 ```powershell
-3sd repair --root G:\ --display-name "Nombre correcto" --app-id 123456
+3sd create --root G:\ --display-name "Mi juego" --app-id 111
+3sd update --root G:\ --display-name "Otro juego" --app-id 222
+3sd convert --root G:\
+3sd repair --root G:\ --display-name "Mi juego" --app-id 111
+3sd tray --steam-action auto
 ```
 
-Ejecutar pruebas:
+## Datos y autorización
 
-```powershell
-py -m pytest
-```
+El manifiesto V2 contiene autorización AES-256-GCM y se escribe de forma atómica.
+La clave común de 3SD facilita el reconocimiento sin internet; puede extraerse de
+la aplicación y **no constituye una certificación infalsificable del emisor**.
+V1 conserva compatibilidad local y puede convertirse explícitamente en cualquier PC.
 
-## Distribucion Python para pruebas
-
-En Windows, instala Python 3.11 o superior con **Tcl/Tk, pip y venv**.
-La preparacion inicial necesita internet. No se instala Python automaticamente.
-
-1. Extrae el ZIP completo en una carpeta.
-2. Ejecuta `Preparar-3SD.bat` (sin administrador).
-3. Usa el acceso directo de 3SD o `Abrir-3SD.bat`.
-
-La aplicacion se instala en `%LOCALAPPDATA%\Programs\3SD`, con su propio
-entorno virtual. Puedes eliminar la carpeta extraida cuando termine.
-Python debe permanecer instalado; no uses un interprete temporal o del repositorio.
-Si no se encuentra Python, define `THREE_SD_PYTHON` con la ruta a `python.exe`.
-
-3SD vuelve a la bandeja al iniciar sesion despues de reiniciar o apagar/encender
-Windows. `Iniciar con Windows` se activa en instalaciones nuevas; las actualizaciones
-conservan tu preferencia. Cerrar la biblioteca no cierra la bandeja; `Exit` si.
-
-Repite `Preparar-3SD.bat` para actualizar o reparar. Si ya estaba abierto, sal
-desde la bandeja y vuelve a abrirlo. Una preparacion fallida conserva la version anterior.
-
-Para revisar errores, usa `Diagnosticar-3SD.bat`; agrega `--run` para abrir con
-consola. El registro esta en `%USERPROFILE%\.3sd\launcher.log`.
-
-Crear el ZIP desde el entorno de desarrollo:
-
-```powershell
-python -m pip install -e ".[dev]"
-python scripts/package_3sd.py
-```
-
-El ZIP se genera en `dist`. Contiene una wheel de 3SD, scripts y documentacion;
-las dependencias de ejecucion tienen versiones fijadas. MSIX queda para otra etapa.
-
-## Documentacion
-
-La documentacion completa del proyecto esta en [MANUAL.md](MANUAL.md).
+El registro, respaldos, portadas y logs viven en `%USERPROFILE%\.3sd`.
+Consulta [MANUAL.md](MANUAL.md) y la [matriz de aceptación](docs/ACCEPTANCE.md).

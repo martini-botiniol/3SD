@@ -16,6 +16,8 @@ from PIL import Image, ImageDraw
 
 from cartridge_launcher.app.state import AppState
 from cartridge_launcher.domain.errors import CartridgeError
+from cartridge_launcher.services.steam_action_service import SteamActionService
+from cartridge_launcher.ui.error_messages import friendlyErrorFromCode
 from cartridge_launcher.domain.states import LauncherState
 from cartridge_launcher.infrastructure.single_instance import SingleInstanceSignal
 from cartridge_launcher.infrastructure.steam_client import SteamClient
@@ -51,6 +53,10 @@ class TrayApp:
         validator = CartridgeValidator(security, registry)
         self.sessionService = CartridgeSessionService(CartridgeWatchService(validator, logger), logger)
         self.currentState = self.sessionService.initialState()
+        self.actionGeneration = 0
+        self.actionInFlight = None
+        self.scanRequested = threading.Event()
+        self.actions = SteamActionService(validator, deviceScanner, SteamClient(), self.runtimeStatusStore)
         self.running = False
         self.workerThread: threading.Thread | None = None
         self.libraryRequested = threading.Event()
@@ -72,7 +78,7 @@ class TrayApp:
         self.instanceSignal.create()
         self._setupStatusWindow()
         self._scanExisting(
-            allowSteamAction=not self.openWindowOnStart,
+            allowSteamAction=True,
             showStatePopups=not self.openWindowOnStart,
             notifyReady=not self.openWindowOnStart,
         )
@@ -118,7 +124,7 @@ class TrayApp:
         return state.state.value
 
     def scanExisting(self) -> None:
-        self._scanExisting()
+        self.scanRequested.set()
 
     def openLibrary(self) -> None:
         if not self.libraryOpen:
@@ -133,6 +139,8 @@ class TrayApp:
 
     def _uiCommand(self) -> list[str]:
         executablePath = Path(sys.executable)
+        if getattr(sys, "frozen", False):
+            return [str(executablePath), "ui", "--from-tray"]
         return [str(executablePath), "-m", "cartridge_launcher.app.main", "ui", "--from-tray"]
 
     def _menu(self):
@@ -146,13 +154,22 @@ class TrayApp:
     def _monitorLoop(self) -> None:
         while self.running:
             time.sleep(self.intervalSeconds)
-            snapshot = self.monitor.pollOnce()
+            if self.scanRequested.is_set():
+                self.scanRequested.clear()
+                self._scanExisting()
+            try:
+                snapshot = self.monitor.pollOnce()
+            except OSError as exc:
+                self.logger.warning("No se pudo explorar discos: %s", exc)
+                continue
             for change in snapshot.removed:
+                if self.currentState.rootPath == str(change.root):
+                    self.actionGeneration += 1
+                    self.runtimeStatusStore.clear()
                 self._handleStates(self.sessionService.handleRemoved(change))
-            for change in snapshot.inserted:
+            for change in snapshot.inserted + snapshot.updated:
                 if self.sessionService.isBlockedByActiveCartridge(change):
                     self._queueStatusPopup(statusPopupMessageFromBlockedCartridge(str(change.root)))
-                    continue
                 self._handleStates(self.sessionService.handleInserted(change))
 
     def _mainLoop(self) -> None:
@@ -259,6 +276,8 @@ class TrayApp:
             and states[-1].manifest is not None
         )
         for state in states:
+            if hasattr(self, "actionGeneration") and (state.rootPath, state.manifest, state.state) != (self.currentState.rootPath, self.currentState.manifest, self.currentState.state):
+                self.actionGeneration += 1
             self.currentState = state
             statusMessage = statusPopupMessageFromState(state)
             popupKey = statusPopupKeyFromState(state)
@@ -282,51 +301,38 @@ class TrayApp:
     def _notifyRemoved(self, state: AppState) -> None:
         if state.rootPath is None:
             return
-        self._notify("Cartucho expulsado", f"El SSD cartucho fue expulsado.\n{state.rootPath}")
+        self._notify("Cartucho expulsado", f"Cartucho desconectado. Si el juego o una descarga seguian abiertos, revisa Steam.\n{state.rootPath}")
 
     def _maybeRunSteamAction(self, state: AppState) -> None:
         if self.steamAction == "none" or state.manifest is None or not self.sessionService.shouldRunSteamAction(state):
             return
-        action = "open" if self.steamAction == "auto" else self.steamAction
-        willOpenGame = action == "open" or (self.steamAction == "auto" and self.steamIntegration.willOpenGame(state.manifest.appId))
-        startedAt = time.time()
-        try:
-            self._writeRuntimeStatus(state, self.steamAction, "sending")
-            if willOpenGame:
-                self._queueStatusPopup(statusPopupMessageFromSteamAction(state.manifest.displayName, "open", str(startedAt)))
-            if self.steamAction == "open":
-                self.steamIntegration.openGame(state.manifest.appId)
-                action = "open"
-            elif self.steamAction == "install":
-                self.steamIntegration.installGame(state.manifest.appId)
-                action = "install"
-            else:
-                libraryRoot = Path(state.rootPath) / state.manifest.libraryPath if state.rootPath is not None else None
-                action = self.steamIntegration.runAutoAction(state.manifest.appId, libraryRoot)
-            self._writeRuntimeStatus(state, action, "accepted")
-            self.sessionService.markSteamActionRun(state)
-            if action == "open" and self.steamIntegration.waitForGameLaunch(state.manifest.appId, startedAt):
-                self._writeRuntimeStatus(state, action, "running")
-        except CartridgeError as exc:
-            self.logger.warning("Tray Steam action failed: %s %s", exc.code, exc)
-        finally:
-            if willOpenGame:
-                self._waitBeforeDismissingSteamPopup(startedAt)
-                self._queueStatusDismiss()
-
-    def _writeRuntimeStatus(self, state: AppState, action: str, phase: str) -> None:
-        if state.manifest is None or state.cartridgeId is None:
+        generation = self.actionGeneration
+        if self.actionInFlight == generation:
             return
-        self.runtimeStatusStore.write(
-            RuntimeStatus(
-                cartridgeId=state.cartridgeId,
-                appId=state.manifest.appId,
-                displayName=state.manifest.displayName,
-                action=action,
-                phase=phase,
-                timestamp=time.time(),
-            )
-        )
+        self.actionInFlight = generation
+        threading.Thread(target=self._performSteamAction, args=(state, generation), daemon=True).start()
+
+    def _performSteamAction(self, state: AppState, generation: int) -> None:
+        def cancelled():
+            return not self.running or generation != self.actionGeneration
+        try:
+            result = self.actions.execute(state, self.steamAction, cancelled)
+            if not cancelled():
+                self.sessionService.markSteamActionRun(state)
+                if result.phase != "running":
+                    self._notify("Steam", result.message)
+        except CartridgeError as exc:
+            self.logger.warning("Steam: %s", exc)
+            if not cancelled():
+                friendly = friendlyErrorFromCode(exc.code)
+                self._notify(friendly.title, exc.message + " " + friendly.action)
+        except Exception as exc:
+            self.logger.warning("Accion Steam fallida: %s", exc)
+            if not cancelled():
+                self._notify("Steam", "No se pudo completar la solicitud. Abre la biblioteca para reintentar.")
+        finally:
+            if self.actionInFlight == generation:
+                self.actionInFlight = None
 
     def _queueStatusPopup(self, message: StatusPopupMessage) -> None:
         messageKey = message.key or f"{message.title}:{message.message}"
@@ -337,11 +343,6 @@ class TrayApp:
 
     def _queueStatusDismiss(self) -> None:
         self.statusMessages.put(statusPopupDismissMessage())
-
-    def _waitBeforeDismissingSteamPopup(self, startedAt: float) -> None:
-        remaining = getattr(self, "steamActionPopupMinimumSeconds", 2) - (time.time() - startedAt)
-        if remaining > 0:
-            time.sleep(remaining)
 
     def _notify(self, title: str, message: str) -> None:
         try:

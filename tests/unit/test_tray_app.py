@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
+from cartridge_launcher.services.steam_action_service import ActionResult
 
 from PIL import Image
 
@@ -22,7 +23,7 @@ class TrayAppTests(unittest.TestCase):
 
         self.assertEqual(command[-2:], ["ui", "--from-tray"])
 
-    def testAutoSteamActionQueuesOpeningGameUntilSteamAcceptsCommand(self) -> None:
+    def testWorkerMarksSessionOnlyAfterSuccessfulAction(self) -> None:
         app = object.__new__(TrayApp)
         app.steamAction = "auto"
         app.statusMessages = __import__("queue").Queue()
@@ -30,6 +31,12 @@ class TrayAppTests(unittest.TestCase):
         app.displayedStatusPopupKeys = set()
         app.steamActionPopupMinimumSeconds = 0
         app.sessionService = FakeSessionService()
+        app.running = True
+        app.actionGeneration = 0
+        app.actionInFlight = None
+        app.currentState = AppState(state=LauncherState.NOT_INSERTED)
+        app.actions = Mock()
+        app.actions.execute.return_value = ActionResult("open", "running", "Juego iniciado.")
         app.steamIntegration = FakeSteamIntegration("open")
         app.runtimeStatusStore = FakeRuntimeStatusStore()
         app.logger = type("Logger", (), {"warning": lambda *_args: None})()
@@ -39,15 +46,11 @@ class TrayAppTests(unittest.TestCase):
             manifest=CartridgeManifest(1, "cart-1", "Game A", "STEAM", "111", "SteamLibrary", "now"),
         )
 
-        app._maybeRunSteamAction(state)
+        app._performSteamAction(state, 0)
 
-        message = app.statusMessages.get_nowait()
-        dismiss = app.statusMessages.get_nowait()
-        self.assertEqual(message.title, "Abriendo juego")
-        self.assertEqual(dismiss.key, "popup:dismiss")
+        app.actions.execute.assert_called_once()
+        self.assertTrue(app.sessionService.marked)
         self.assertTrue(app.statusMessages.empty())
-        self.assertEqual(app.steamIntegration.openedAppId, "111")
-        self.assertEqual(app.steamIntegration.waitedAppId, "111")
 
     def testAutoSteamFlowDoesNotQueueValidationPopups(self) -> None:
         app = object.__new__(TrayApp)
@@ -59,6 +62,12 @@ class TrayAppTests(unittest.TestCase):
         app.lastStatusPopupKey = None
         app.libraryOpen = False
         app.sessionService = FakeSessionService()
+        app.running = True
+        app.actionGeneration = 0
+        app.actionInFlight = None
+        app.currentState = AppState(state=LauncherState.NOT_INSERTED)
+        app.actions = Mock()
+        app.actions.execute.return_value = ActionResult("open", "running", "Juego iniciado.")
         app.steamIntegration = FakeSteamIntegration("open")
         app.runtimeStatusStore = FakeRuntimeStatusStore()
         app.readyNotificationCartridgeId = None
@@ -74,15 +83,11 @@ class TrayAppTests(unittest.TestCase):
             ),
         )
 
-        app._handleStates(states)
+        with patch.object(app, "_maybeRunSteamAction") as dispatch:
+            app._handleStates(states)
+        dispatch.assert_called_once_with(states[-1])
 
-        message = app.statusMessages.get_nowait()
-        dismiss = app.statusMessages.get_nowait()
-        self.assertEqual(message.title, "Abriendo juego")
-        self.assertNotEqual(message.title, "Validando cartucho")
-        self.assertEqual(dismiss.key, "popup:dismiss")
         self.assertTrue(app.statusMessages.empty())
-        self.assertEqual(app.steamIntegration.openedAppId, "111")
 
     def testExistingCartridgeShownOnAppOpenDoesNotAutoLaunch(self) -> None:
         app = object.__new__(TrayApp)
@@ -94,6 +99,12 @@ class TrayAppTests(unittest.TestCase):
         app.lastStatusPopupKey = None
         app.libraryOpen = False
         app.sessionService = FakeSessionService()
+        app.running = True
+        app.actionGeneration = 0
+        app.actionInFlight = None
+        app.currentState = AppState(state=LauncherState.NOT_INSERTED)
+        app.actions = Mock()
+        app.actions.execute.return_value = ActionResult("open", "running", "Juego iniciado.")
         app.steamIntegration = FakeSteamIntegration("open")
         app.runtimeStatusStore = FakeRuntimeStatusStore()
         app.readyNotificationCartridgeId = None
@@ -129,7 +140,7 @@ class TrayAppTests(unittest.TestCase):
 
         app._handleStates((AppState(state=LauncherState.NOT_INSERTED, rootPath="G:\\"),))
 
-        self.assertEqual(notifications, [("Cartucho expulsado", "El SSD cartucho fue expulsado.\nG:\\")])
+        self.assertEqual(notifications, [("Cartucho expulsado", "Cartucho desconectado. Si el juego o una descarga seguian abiertos, revisa Steam.\nG:\\")])
         self.assertIsNone(app.readyNotificationCartridgeId)
 
     def testRepeatedRemovedCartridgePopupsAreNotDeduplicated(self) -> None:
@@ -153,7 +164,16 @@ class TrayAppTests(unittest.TestCase):
         app.displayedStatusPopupKeys = set()
         app.steamActionPopupMinimumSeconds = 0
         app.sessionService = FakeSessionService()
+        app.running = True
+        app.actionGeneration = 0
+        app.actionInFlight = None
+        app.currentState = AppState(state=LauncherState.NOT_INSERTED)
+        app.actions = Mock()
+        app.actions.execute.return_value = ActionResult("open", "running", "Juego iniciado.")
         app.steamIntegration = FailingSteamIntegration()
+        from cartridge_launcher.domain.errors import CartridgeError, ErrorCode
+        app.actions.execute.side_effect = CartridgeError(ErrorCode.STEAM_NOT_FOUND, "Steam failed")
+        app.icon = Mock()
         app.runtimeStatusStore = FakeRuntimeStatusStore()
         app.logger = type("Logger", (), {"warning": lambda *_args: None})()
         state = AppState(
@@ -162,7 +182,7 @@ class TrayAppTests(unittest.TestCase):
             manifest=CartridgeManifest(1, "cart-1", "Game A", "STEAM", "111", "SteamLibrary", "now"),
         )
 
-        app._maybeRunSteamAction(state)
+        app._performSteamAction(state, 0)
 
         self.assertFalse(app.sessionService.marked)
 

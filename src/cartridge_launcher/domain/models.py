@@ -19,6 +19,7 @@ class CartridgeManifest:
     appId: str
     libraryPath: str
     createdAt: str
+    authorization: dict | None = None
 
 
 @dataclass(frozen=True)

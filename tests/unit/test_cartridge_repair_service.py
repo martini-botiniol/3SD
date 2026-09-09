@@ -29,12 +29,12 @@ class CartridgeRepairServiceTests(unittest.TestCase):
             (root / "SteamLibrary").mkdir()
             manifest = {
                 "schemaVersion": 1,
-                "cartridgeId": "cart-1",
+                "cartridgeId": "00000000-0000-4000-8000-000000000001",
                 "displayName": "Old Game",
                 "platform": "STEAM",
                 "appId": "111",
                 "libraryPath": "SteamLibrary",
-                "createdAt": "now",
+                "createdAt": "2026-09-08T00:00:00Z",
             }
             (metadata / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
             (metadata / "signature.sig").write_text("bad-signature", encoding="utf-8")
@@ -42,10 +42,11 @@ class CartridgeRepairServiceTests(unittest.TestCase):
 
             repaired = service.repair(root, "New Game", "222")
 
-            self.assertEqual(repaired.cartridgeId, "cart-1")
+            self.assertEqual(repaired.cartridgeId, "00000000-0000-4000-8000-000000000001")
             self.assertEqual(repaired.displayName, "New Game")
             self.assertEqual(repaired.appId, "222")
-            self.assertTrue(service.security.verify((metadata / "manifest.json").read_bytes(), (metadata / "signature.sig").read_text(encoding="utf-8")))
+            from cartridge_launcher.services.portable_authorization import verifyAuthorization
+            verifyAuthorization(json.loads((metadata / "manifest.json").read_text(encoding="utf-8")))
 
     def testRepairRebuildsBrokenManifestWithNewCartridgeId(self) -> None:
         with TemporaryDirectory() as directory:

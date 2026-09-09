@@ -1,10 +1,11 @@
 [project]
 name = "3sd"
-version = "0.1.0"
+version = "0.2.0"
 description = "Prototype launcher that maps physical SSD cartridges to Steam games."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "cryptography==50.0.1",
   "Pillow==11.3.0",
   "pystray==0.19.5",
   "pywin32==311; platform_system=='Windows'",
@@ -12,6 +13,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+build = ["pyinstaller==6.16.0"]
 dev = [
   "pytest==8.4.2",
   "wheel==0.45.1",

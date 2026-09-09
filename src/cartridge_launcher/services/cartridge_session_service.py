@@ -14,6 +14,7 @@ class CartridgeSessionService:
         self.logger = logger or logging.getLogger(__name__)
         self.currentState = AppState(state=LauncherState.NOT_INSERTED, message="waiting for cartridge")
         self.lastSteamActionCartridgeId: str | None = None
+        self.waiting: dict[str, DeviceChange] = {}
 
     def initialState(self) -> AppState:
         return self.currentState
@@ -26,18 +27,28 @@ class CartridgeSessionService:
 
     def handleInserted(self, change: DeviceChange) -> tuple[AppState, ...]:
         if self.isBlockedByActiveCartridge(change):
-            self.logger.info("Ignoring inserted cartridge while another cartridge is active: %s", change.root)
+            self.waiting[str(change.root)] = change
+            self.logger.info("Cartucho en espera: %s", change.root)
             return ()
         states = self.watchService.handleInsertedStates(change)
         if states:
+            if states[-1].manifest != self.currentState.manifest:
+                self.lastSteamActionCartridgeId = None
             self.currentState = states[-1]
         return states
 
     def handleRemoved(self, change: DeviceChange) -> tuple[AppState, ...]:
+        self.waiting.pop(str(change.root), None)
         if self.currentState.rootPath == str(change.root):
             self.currentState = self.watchService.handleRemoved(change)
             self.lastSteamActionCartridgeId = None
-            return (self.currentState,)
+            states = [self.currentState]
+            for root, pending in tuple(self.waiting.items()):
+                self.waiting.pop(root, None)
+                states.extend(self.handleInserted(pending))
+                if self._hasActiveCartridge():
+                    break
+            return tuple(states)
         return ()
 
     def shouldRunSteamAction(self, state: AppState) -> bool:

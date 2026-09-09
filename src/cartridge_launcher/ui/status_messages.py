@@ -20,7 +20,7 @@ def statusPopupMessageFromState(state: AppState) -> StatusPopupMessage | None:
     if state.state == LauncherState.READY and state.manifest is not None:
         return StatusPopupMessage("Cartucho listo", f"{state.manifest.displayName} esta listo.", 1200, key=statusPopupKeyFromState(state) or "")
     if state.state == LauncherState.NOT_INSERTED and state.rootPath is not None:
-        return StatusPopupMessage("Cartucho expulsado", f"El SSD cartucho fue expulsado.\n{state.rootPath}", key=statusPopupKeyFromState(state) or "")
+        return StatusPopupMessage("Cartucho desconectado", f"{state.rootPath}\nSi el juego o una descarga seguian abiertos, revisa Steam.", 3000, key=statusPopupKeyFromState(state) or "")
     if state.errorCode is not None:
         return StatusPopupMessage("No se pudo usar el cartucho", state.message or state.errorCode.value, key=statusPopupKeyFromState(state) or "")
     return None

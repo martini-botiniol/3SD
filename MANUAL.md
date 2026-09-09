@@ -1,397 +1,170 @@
-# Manual De 3SD
+# Manual de 3SD 0.2
 
-3SD es un prototipo para Windows y Steam que usa SSDs extraibles como
-cartuchos fisicos. El SSD no contiene codigo confiable para ejecutar; contiene
-una identidad firmada que apunta a un juego de Steam mediante AppID.
+## Experiencia de uso
 
-El modelo rector es:
+El flujo es `SSD → 3SD → Steam → Juego`. 3SD debe permanecer abierto en la bandeja.
+Cerrar la biblioteca conserva la bandeja; Salir termina la aplicación.
+El modo por defecto es automático. Un juego instalado en la biblioteca del SSD
+se abre mediante Steam; una instalación ausente o incompleta se deriva a Steam.
+Una cuenta sin licencia, una sesión cerrada o una descarga pendiente puede requerir
+intervención dentro de Steam: 3SD no elude esas condiciones.
 
-```text
-Cartucho (SSD) -> 3SD -> Steam -> Juego
-```
+La primera vez que Steam ve una biblioteca en una PC puede ser necesario añadir
+`X:\SteamLibrary` en Parámetros > Almacenamiento. 3SD muestra la ruta concreta y
+no edita `libraryfolders.vdf` ni fuerza silenciosamente el destino de instalación.
+El procedimiento se basa en la [ayuda de Steam](https://help.steampowered.com/en/faqs/view/4578-18A7-C819-8620).
+Si el mismo AppID existe en varias bibliotecas, 3SD comprueba el SSD, pero Steam
+conserva la elección final de la instalación que ejecuta. La confirmación se busca
+en la biblioteca del cartucho; revisa Steam si el inicio no se confirma.
 
-Steam conserva la autoridad sobre licencias, instalacion, actualizaciones,
-integridad y ejecucion. 3SD solo valida el cartucho y solicita a Steam abrir o
-instalar el juego asociado.
+## Crear, actualizar y convertir
 
-## Vision General
+En Opciones selecciona un disco y busca el juego o introduce su nombre y AppID.
+Crear genera un cartucho V2. Actualizar conserva UUID y fecha de creación y cambia
+el juego; puede hacerse desde cualquier PC con 3SD compatible.
 
-La experiencia buscada es cercana a una consola:
-
-1. El usuario conecta un SSD preparado como cartucho.
-2. El launcher detecta el disco.
-3. Si el cartucho es valido, queda listo para abrir o instalar el juego.
-4. Si el cartucho esta incompleto, modificado o no coincide con el dispositivo
-   registrado, se rechaza antes de contactar a Steam.
-
-Estado actual:
-
-- UI principal con biblioteca de portadas.
-- Tray app residente.
-- Creacion y actualizacion de cartuchos.
-- Deteccion de discos por polling.
-- Validacion de `.cartridge/manifest.json` con firma HMAC-SHA256.
-- Acciones Steam: abrir, instalar y modo automatico.
-- Distribucion Python para pruebas internas, sin certificados locales.
-- Inicio con Windows configurable desde la UI.
-
-## Uso
-
-Instalar dependencias para desarrollo:
+Un V1 válido en su PC puede seguir utilizándose. Para compartirlo, selecciona el
+SSD y pulsa **Preparar para usar en cualquier PC**. No hace falta la PC creadora:
+la acción acepta expresamente metadata antigua cuya firma puede no verificarse
+localmente. Se validan los campos y se guardan `manifest.json.v1.bak` y
+`signature.sig.v1.bak`, cuando exista firma. Una conexión nunca convierte el SSD.
 
 ```powershell
-py -m pip install -e ".[dev]"
+3sd create --root G:\ --display-name "Juego" --app-id 111
+3sd update --root G:\ --display-name "Otro juego" --app-id 222
+3sd convert --root G:\
+3sd repair --root G:\ --display-name "Juego" --app-id 111
 ```
 
-Abrir la ventana principal:
+Reparar es una acción explícita para metadata dañada. Conserva una copia del
+manifiesto anterior y desactiva metadata ejecutable conservando copia `.disabled`.
+No modifica los archivos del juego. Si la versión o la clave pertenecen a una
+versión desconocida, actualiza 3SD: no se permite sobrescribirla como reparación.
+Un error de registro posterior al guardado no invalida el manifiesto: tras recuperar
+el registro, vuelve a conectar o escanear para registrarlo.
 
-```powershell
-3sd ui
-```
-
-Iniciar en modo tray:
-
-```powershell
-3sd tray --open-window --steam-action auto
-```
-
-Ejecutar pruebas:
-
-```powershell
-py -m pytest
-```
-
-Al usar el acceso directo o `Abrir-3SD.bat`, la app inicia el tray y abre la biblioteca.
-Desde el tray se puede abrir la biblioteca, escanear cartuchos ya conectados o
-salir completamente del proceso.
-
-La biblioteca muestra cartuchos registrados en esta PC con portada, nombre y
-estado simple. Las acciones de Steam solo se habilitan cuando el SSD de ese
-cartucho esta insertado y validado.
-
-## Cartuchos
-
-Un cartucho es un SSD extraible con metadata minima firmada localmente:
+## Formato portátil V2
 
 ```text
 G:\
-  .cartridge\
+  .cartridge/
     manifest.json
-    signature.sig
-  SteamLibrary\
+    manifest.previous.json      (respaldo de la escritura anterior)
+    manifest.json.v1.bak         (tras conversión)
+    signature.sig.v1.bak         (si V1 incluía firma)
+    write.lock                  (coordinación de escritores)
+  SteamLibrary/
+    steamapps/
 ```
 
-Ejemplo de `manifest.json`:
+El manifiesto contiene `schemaVersion: 2`, UUID `cartridgeId`, nombre no vacío,
+`platform: STEAM`, AppID decimal positivo de 32 bits, `libraryPath: SteamLibrary`
+y fecha ISO-8601 con zona horaria. `authorization` contiene:
 
-```json
-{
-  "schemaVersion": 1,
-  "cartridgeId": "00000000-0000-4000-8000-000000000001",
-  "displayName": "The Last of Us Part II Remastered",
-  "platform": "STEAM",
-  "appId": "2531310",
-  "libraryPath": "SteamLibrary",
-  "createdAt": "2026-07-23T00:00:00Z"
-}
-```
+- `version: 1` y `keyId: 3sd-portable-2026-01`.
+- `nonce`: 12 bytes aleatorios, representados en Base64.
+- `ciphertext`: datos cifrados y etiqueta de autenticación, en Base64.
 
-Campos principales:
+Se utiliza AES-256-GCM con la clave de aplicación estable. El contenido cifrado
+incluye marcador `3SD-CARTRIDGE`, versión 2, UUID y AppID. Los datos adicionales
+autenticados son todo el manifiesto salvo `authorization`, serializado como JSON
+UTF-8, claves ordenadas, sin espacios y sin escapar caracteres Unicode.
+Se rechazan claves JSON duplicadas, NaN y manifiestos de más de 64 KiB.
+Cambiar un campo o copiar una autorización entre cartuchos invalida el conjunto;
+cambiar únicamente espacios o el orden de las claves JSON no cambia su significado.
+La API utilizada sigue la [documentación AESGCM](https://cryptography.io/en/latest/hazmat/primitives/aead/).
 
-- `schemaVersion`: version del formato. Actualmente `1`.
-- `cartridgeId`: UUID estable del cartucho.
-- `displayName`: nombre visible del juego.
-- `platform`: por ahora siempre `STEAM`.
-- `appId`: Steam AppID numerico.
-- `libraryPath`: debe ser exactamente `SteamLibrary`.
-- `createdAt`: fecha ISO-8601.
+No se genera una clave común nueva al instalar o compilar. Cualquier rotación
+futura debe conservar lectura de los `keyId` anteriores. El nonce sí cambia en
+cada escritura. No se necesita una clave privada del usuario ni una PC de origen.
+La clave común está distribuida con 3SD y puede extraerse: identifica compatibilidad
+e integridad, no demuestra emisión oficial frente a una falsificación deliberada.
 
-Crear cartucho desde CLI:
+V2 sin autorización o con autenticación fallida se rechaza, aunque exista una
+firma V1 al lado. Formatos, versiones de autorización o claves desconocidas piden
+actualizar la aplicación. Nunca se hace fallback de un V2 inválido a V1.
+
+La firma HMAC-SHA256 de V1 continúa en `signature.sig` y depende del antiguo
+`launcher.secret` local. Los secretos nuevos de ese mecanismo heredado usan DPAPI
+en Windows; los antiguos Base64 siguen siendo legibles. Leer un cartucho externo
+no crea ni modifica secretos. V2 no necesita `launcher.secret`.
+
+## Detección, estados y desconexión
+
+Se exploran unidades locales D: a Z: cada dos segundos, excluyendo unidades de red.
+Todavía no se comprueba si el hardware es estrictamente SSD. Se compara identidad
+del volumen y capacidad, además de cambios del archivo de manifiesto. Si el adaptador
+no reporta identidad o el cambio completo ocurre entre dos consultas sin diferencias
+observables, el polling puede no detectarlo.
+
+Hay un cartucho activo. Los adicionales quedan en espera y se evalúan al retirar
+el actual. Los cambios cancelan esperas y resultados de la sesión anterior. Se
+revalida el cartucho y la presencia del dispositivo antes de enviar una acción.
+
+Los mensajes distinguen validación, solicitud enviada, juego iniciado, inicio no
+confirmado y necesidad de instalación/configuración. La confirmación usa procesos
+bajo el directorio del juego o una actualización reciente de `LastPlayed`; es una
+observación heurística, no una sesión de juego controlada por 3SD.
+
+Antes de desconectar el SSD, termina juegos y descargas que lo utilicen. Retirar
+un disco mientras se escribe puede dañar datos. 3SD cancela sus tareas pendientes,
+pero no expulsa físicamente el volumen ni termina procesos del juego a la fuerza.
+
+## Persistencia y recuperación
+
+`%USERPROFILE%\.3sd` contiene registro local, respaldo, caché y logs rotativos.
+El registro no concede propiedad de un cartucho V2 a una PC. Se registra
+automáticamente tras validarlo, tanto desde la ventana como desde la bandeja.
+
+Las actualizaciones del registro se serializan entre hilos y procesos. Se guarda
+`registry.json.bak` antes de reemplazar un registro válido. Si el principal está
+corrupto, se informa y se lee el respaldo; una escritura posterior conserva el
+archivo dañado como `registry.json.corrupt`. Sin respaldo válido se muestra un
+error y se evita sustituirlo por una biblioteca vacía. Conserva esos archivos para
+recuperación; no los borres para ocultar el error.
+
+V2 guarda datos y autorización en un único archivo temporal, sincroniza y reemplaza
+el manifiesto. Si el reemplazo falla, el anterior permanece disponible en condiciones
+normales del sistema de archivos. Esto no garantiza recuperación frente a daño físico
+o corrupción del sistema de archivos. Tras reconectar, repite la operación explícita.
+
+## Instalación y distribución
+
+El paquete autónomo incluye Python, Tcl/Tk y dependencias. Extrae el ZIP completo y
+abre `3SD.exe` o `Instalar-3SD.bat`. Instala generaciones en
+`%LOCALAPPDATA%\Programs\3SD\packages`, comprueba el ejecutable antes de activar
+accesos directos y conserva la generación anterior. No importa certificados ni
+cambia políticas de Windows. Una firma comercial pública queda fuera de este build.
+
+En instalaciones nuevas se activa inicio con Windows; las actualizaciones conservan
+la preferencia existente. Cierra la bandeja antes de empezar a usar una actualización.
+La desinstalación retira accesos e inicio automático; por estar el ejecutable en uso,
+se pide cerrar 3SD y eliminar la carpeta de instalación. Los datos `.3sd` y SSD se
+conservan. No se eliminan instalaciones Python anteriores de forma automática.
+
+La alternativa Python mantiene `Preparar-3SD.bat`, `Abrir-3SD.bat` y
+`Diagnosticar-3SD.bat`. Requiere Python 3.11+ con Tcl/Tk, pip y venv e internet
+para preparar. No depende de una instalación editable ni del checkout una vez
+publicada. Los entornos anteriores se conservan para recuperación.
 
 ```powershell
-3sd create --root G:\ --display-name "The Last of Us Part II Remastered" --app-id 2531310
+python -m pip install -e ".[dev,build]"
+python -m pytest
+python scripts/package_standalone.py
+python scripts/package_3sd.py
 ```
 
-Actualizar cartucho desde CLI:
-
-```powershell
-3sd update --root G:\ --display-name "Nuevo nombre" --app-id 123456
-```
-
-Reparar cartucho desde CLI:
-
-```powershell
-3sd repair --root G:\ --display-name "Nombre correcto" --app-id 123456
-```
-
-Desde la UI, el flujo equivalente esta en `Opciones`: seleccionar disco,
-buscar o escribir nombre/AppID y presionar `Crear cartucho` o
-`Actualizar cartucho`. Si el SSD aparece como invalido, usa `Reparar cartucho`
-para reconstruir manifest, firma, registro local y eliminar metadata ejecutable
-dentro de `.cartridge`.
-
-No edites manualmente `manifest.json`. Si cambia el contenido exacto del
-archivo, la firma deja de coincidir y el cartucho queda como
-`INVALID_CARTRIDGE`.
-
-## Arquitectura
-
-Flujo principal:
-
-```text
-SSD cartucho -> DeviceMonitor -> CartridgeSessionService -> UI/Tray -> Steam
-```
-
-Capas:
-
-- `domain`: modelos, estados, errores y reglas puras del manifest.
-- `services`: logica de aplicacion para crear, actualizar, validar, registrar y
-  observar cartuchos.
-- `infrastructure`: integraciones con Windows, Steam, inicio con Windows,
-  instancia unica y logging.
-- `ui`: ventana principal, tray, popups, mensajes, portadas y view models.
-- `app`: entrada CLI y wiring de comandos `ui`, `tray`, `create`, `update` y
-  `startup`.
-
-El registro local vive en:
-
-```text
-%USERPROFILE%\.3sd\registry.json
-```
-
-Contiene `cartridgeId`, `appId`, `volumeSerialNumber`, `capacityBytes` y
-`displayName`. La UI sincroniza el registro con el manifest cuando un cartucho
-valida como `READY`.
-
-## Flujo De Estados
-
-Insercion:
-
-```text
-Disco insertado
-  -> unidad de red
-     -> ignorado
-  -> ya hay otro cartucho activo
-     -> avisar e ignorar hasta remover el activo
-  -> no tiene .cartridge
-     -> ignorado
-  -> tiene .cartridge
-     -> VALIDATING
-        -> estructura minima
-        -> manifest JSON y schema
-        -> firma HMAC
-        -> libraryPath y AppID
-        -> asociacion con dispositivo
-     -> READY
-        -> activar sesion
-        -> marcar biblioteca como Insertado
-        -> permitir accion Steam
-     -> INVALID_CARTRIDGE / DEVICE_MISMATCH
-        -> mostrar error humano
-```
-
-Remocion:
-
-```text
-Disco removido
-  -> no es el activo
-     -> ignorado
-  -> es el activo
-     -> NOT_INSERTED
-     -> limpiar activeCartridgeId
-     -> limpiar proteccion de accion Steam
-```
-
-Estados operativos:
-
-- `NOT_INSERTED`: no existe un cartucho activo.
-- `VALIDATING`: se verifica estructura, firma y reglas.
-- `READY`: cartucho valido y disponible.
-- `OPENING`: solicitud de apertura enviada a Steam.
-- `GAME_RUNNING`: Steam inicio el juego.
-- `NOT_INSTALLED`: Steam requiere instalacion.
-- `STEAM_REQUIRED`: Steam no esta disponible.
-- `INVALID_CARTRIDGE`: estructura, manifest o firma no confiable.
-- `DEVICE_MISMATCH`: el SSD no coincide con el registro local.
-- `ERROR`: fallo inesperado.
-
-## Seguridad
-
-Reglas principales:
-
-- 3SD nunca ejecuta `.exe`, `.bat`, `.cmd`, `.ps1`, `.dll` o `.msi` desde el
-  SSD.
-- Abrir e instalar se hacen con `steam://run/{appId}` y
-  `steam://install/{appId}`.
-- `libraryPath` debe ser exactamente `SteamLibrary`.
-- `appId` debe ser numerico y estar entre `1` y `4294967295`.
-- `.cartridge` esta reservado para metadata del launcher.
-- V1 acepta unidades locales con letra de unidad y excluye unidades de red; aun
-  no verifica si el dispositivo es estrictamente SSD.
-
-`signature.sig` contiene HMAC-SHA256 del contenido exacto de `manifest.json`.
-El secreto local vive en:
-
-```text
-%USERPROFILE%\.3sd\launcher.secret
-```
-
-El secreto no se copia al SSD. En V1, los cartuchos son confiables solo en la
-PC que los creo.
-
-## Preparacion, Actualizacion E Inicio Automatico
-
-Requisitos: Windows, Python 3.11 o superior con Tcl/Tk, pip y venv, e internet
-para descargar dependencias. La distribucion de pruebas fija Pillow, pystray,
-pywin32 y six. No requiere certificados ni administrador en el uso diario.
-La ejecucion con Python no garantiza superar todas las politicas de cada equipo.
-
-Extrae el ZIP y ejecuta `Preparar-3SD.bat`. Si el interprete no esta en PATH,
-define `THREE_SD_PYTHON` con su ruta completa. Tambien puedes ejecutar:
-
-```powershell
-python scripts/prepare_3sd.py
-```
-
-La ubicacion predeterminada es `%LOCALAPPDATA%\Programs\3SD`. Para pruebas
-tecnicas existe `--install-directory`; los lanzadores del ZIP usan la ubicacion
-predeterminada, por lo que con una ruta personalizada debes usar sus accesos directos.
-
-Cada preparacion crea un entorno en `runtimes/<identificador>` en su ubicacion
-definitiva. Instala una wheel, comprueba dependencias, Tkinter y el backend de la
-bandeja, y solo entonces publica accesos directos y `installation.json`.
-No depende del checkout ni de una instalacion editable. No copies entornos virtuales
-entre equipos y no desinstales o muevas el Python base usado para prepararlos.
-
-Puedes borrar la carpeta extraida. Para actualizar, extrae el ZIP nuevo y repite
-la preparacion. Sal de la bandeja antes de empezar a usar la nueva version.
-La version anterior permanece en disco; una preparacion fallida no cambia los
-accesos de la version activa. Los entornos fallidos incluyen `failed.json`.
-No se eliminan automaticamente entornos antiguos para conservar la recuperacion.
-
-El inicio automatico usa un acceso directo en la carpeta Inicio del usuario.
-Se activa en una instalacion nueva, conserva la configuracion al migrar y respeta
-la desactivacion en actualizaciones. Puedes cambiarlo en Opciones o con los
-comandos `startup enable`, `startup disable` y `startup status`, ejecutados con
-el Python de la instalacion.
-
-Tras reinicio, apagado/encendido o cierre de sesion, 3SD vuelve a ejecutarse
-**al iniciar sesion**, en la bandeja, sin consola ni biblioteca abierta. Detecta
-SSD ya conectados y conserva las acciones Steam existentes. No es un servicio
-previo al inicio de sesion. Cerrar la biblioteca mantiene el tray; `Exit` termina
-la aplicacion hasta su proxima apertura o inicio de sesion.
-
-## Limpieza Del Flujo Anterior
-
-Ejecuta primero la preparacion Python. La limpieza esta separada y no se ejecuta
-cada vez que se prepara la aplicacion. Inventario sin cambios:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy RemoteSigned -File scripts/cleanup_legacy.ps1
-```
-
-La politica indicada se limita a ese proceso de PowerShell; no cambia la configuracion persistente de Windows. Para aplicar, agrega `-Apply`. Para incluir los artefactos del checkout, agrega
-`-ProjectDirectory` con su ruta completa. El script se copia tambien a la carpeta
-instalada, por lo que no depende de conservar el ZIP.
-
-Solo identifica certificados `CN=3SD Local Dev`, autofirmados y con uso de firma
-de codigo, corroborados por las firmas o certificados exportados de 3SD. Si no
-quedan esos archivos, deja los certificados pendientes; tras verificar el inventario
-puede pasarse una huella exacta mediante `-Thumbprint`. Nunca busca nombres parciales.
-
-Retira las copias identificadas en los almacenes de usuario y equipo y las claves
-privadas asociadas si existen. La limpieza de LocalMachine requiere ejecutar este
-paso en PowerShell como administrador, conservando el usuario y la ruta de instalacion
-originales. No modifica las protecciones de Windows ni instala certificados.
-
-Antes de borrar verifica la instalacion Python y guarda un inventario; despues
-registra el resultado de cada elemento en `legacy-cleanup-report.json`. Los fallos
-de permisos o archivos en uso quedan pendientes (codigo de salida 2). Cierra el
-3SD anterior desde su bandeja y repite el paso si su EXE sigue en uso.
-
-Se conservan `%USERPROFILE%\.3sd`, `launcher.secret`, el registro y todos los SSD.
-Las firmas HMAC de cartuchos son independientes de los certificados de Windows.
-La portabilidad de cartuchos entre PCs no forma parte de esta migracion.
-
-## Retirar La Distribucion De Pruebas
-
-Desactiva `Iniciar con Windows`, sal de 3SD y elimina sus accesos directos de
-escritorio/menu Inicio. Elimina exclusivamente `%LOCALAPPDATA%\Programs\3SD`
-despues de confirmar que es la carpeta de esta instalacion. Los datos y el secreto
-en `%USERPROFILE%\.3sd` permanecen para futuras instalaciones. Python puede
-seguir siendo utilizado por otras aplicaciones y no se desinstala con 3SD.
-
-## Troubleshooting
-
-`No module named PIL`:
-
-```powershell
-py -m pip install -e ".[dev]"
-```
-
-`No module named tkinter`: instala Python desde python.org con `tcl/tk and
-IDLE`, reinstala dependencias y prueba:
-
-```powershell
-py -c "import tkinter; root = tkinter.Tk(); root.destroy(); print('tk ok')"
-```
-
-La aplicacion no inicia o falta una dependencia: ejecuta `Diagnosticar-3SD.bat`.
-Usa `Diagnosticar-3SD.bat --run` para conservar una consola durante el arranque.
-Repite la preparacion para reparar; revisa `launcher.log` y cualquier error de
-politica de Windows por separado.
-
-La portada dice `Juego sin nombre`: conecta el cartucho y espera `READY`, usa
-`Actualizar cartucho` o ejecuta `update` desde CLI.
-
-La portada no carga: las portadas vienen de Steam CDN; si no hay internet o
-Steam no tiene imagen, la UI usa fallback visual.
-
-Steam no abre el juego: revisa que Steam este instalado/disponible, que el
-AppID sea correcto y que la accion no haya sido bloqueada por repeticion.
-
-`INVALID_SIGNATURE`: el manifest fue modificado o no coincide con
-`signature.sig`; usa `Reparar cartucho`.
-
-`DEVICE_MISMATCH`: el cartucho no coincide con el disco registrado en esta PC;
-puede pasar si se copio `.cartridge` a otro SSD o cambio el registro local. Si
-el SSD es tuyo y quieres confiarlo en esta PC, usa `Reparar cartucho`.
-
-## Pendientes V1
-
-Producto y UI:
-
-- Definir icono final.
-- Revisar textos finales de UI.
-- Probar flujo completo con al menos dos SSD/cartuchos reales.
-- Validar cambio rapido de cartuchos.
-- Pulir responsive en pantallas pequenas.
-- Mejorar selector de busqueda Steam con portadas/resultados mas claros.
-- Agregar indicador visual mas claro del cartucho activo.
-- Revisar estados vacios: sin discos, sin internet, sin Steam, sin cartuchos.
-
-Tray y Steam:
-
-- Confirmar comportamiento despues de varios ciclos abrir/cerrar ventana.
-- Validar con juegos reales instalados y no instalados.
-- Mejorar mensaje cuando Steam recibe la orden pero no inicia nada visible.
-- Evaluar deteccion mas robusta de juego instalado.
-- Observar transiciones `OPENING -> GAME_RUNNING -> READY` cuando sea posible.
-
-Cartuchos y persistencia:
-
-- Hacer mas guiado el flujo de actualizacion.
-- Pulir confirmaciones de reparacion para explicar cuando se reescribe metadata.
-- Evaluar deteccion estricta de SSD en una version futura.
-- Definir migracion futura a SQLite sin cambiar contratos de servicios.
-- Evaluar exportar/importar registro local solo con portabilidad segura entre
-  PCs.
-
-## Icono Y Assets
-
-Cuando tengas el icono final, ponlo en:
-
-```text
-assets\3SD.ico
-```
-
-Tamanos recomendados dentro del `.ico`: 16x16, 32x32, 48x48 y 256x256.
+El constructor autónomo exige Tcl/Tk operativo, ejecuta pruebas y verifica
+`3SD.exe self-check` antes de generar el ZIP. El inventario de dependencias del
+build acompaña el paquete. Usar un entorno limpio evita dependencias accidentales.
+
+## Arquitectura y validación
+
+`domain` define tipos y validación; `services` administra cartuchos, autorización,
+sesiones y acciones; `infrastructure` integra Steam, Windows y persistencia;
+`ui` mantiene Tk y entrega resultados de trabajadores al hilo principal;
+`app` ofrece consola y composición de servicios.
+
+Las pruebas automatizadas utilizan directorios temporales y clientes simulados;
+no prueban licencias o juegos reales. Consulta [ACCEPTANCE.md](docs/ACCEPTANCE.md)
+para los escenarios y la validación física pendiente en dos PCs y dos SSD.

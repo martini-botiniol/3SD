@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
@@ -17,7 +18,7 @@ def configureLogging(logPath: Path | None = None) -> logging.Logger:
 
     if logPath is not None:
         logPath.parent.mkdir(parents=True, exist_ok=True)
-        fileHandler = logging.FileHandler(logPath, encoding="utf-8")
+        fileHandler = RotatingFileHandler(logPath, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
         fileHandler.setFormatter(formatter)
         logger.addHandler(fileHandler)
 

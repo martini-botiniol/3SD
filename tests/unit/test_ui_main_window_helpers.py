@@ -44,13 +44,13 @@ class UiMainWindowHelperTests(unittest.TestCase):
 
         self.assertEqual(message.dismissAfterMilliseconds, 1200)
 
-    def testRemovedCartridgePopupWaitsForUserAction(self) -> None:
+    def testRemovedCartridgePopupDismissesWithoutUserAction(self) -> None:
         message = statusPopupMessageFromState(AppState(state=LauncherState.NOT_INSERTED, rootPath="G:\\"))
 
-        self.assertEqual(message.title, "Cartucho expulsado")
-        self.assertIn("El SSD cartucho fue expulsado.", message.message)
+        self.assertEqual(message.title, "Cartucho desconectado")
+        self.assertIn("revisa Steam", message.message)
         self.assertIn("G:\\", message.message)
-        self.assertIsNone(message.dismissAfterMilliseconds)
+        self.assertEqual(message.dismissAfterMilliseconds, 3000)
 
     def testBlockedCartridgePopupExplainsActiveCartridgeRule(self) -> None:
         message = statusPopupMessageFromBlockedCartridge("H:\\")

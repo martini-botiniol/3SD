@@ -11,7 +11,8 @@ Flujo recomendado
 4. Escribe el nombre del juego o buscalo por nombre.
 5. Confirma que el Steam AppID sea el correcto.
 6. Abre "Crear cartucho" para preparar un SSD nuevo, "Actualizar cartucho" para reemplazar el juego de un cartucho existente, o "Reparar cartucho" si el SSD aparece como invalido.
-7. Cuando el SSD SLOT muestre "Listo", usa Jugar o Instalar.
+7. En modo automatico, conecta el cartucho y 3SD solicita abrir o instalar en Steam.
+8. Para un cartucho antiguo, pulsa "Preparar para usar en cualquier PC" una vez. No necesitas el equipo creador.
 
 SSD SLOT
 
@@ -19,7 +20,7 @@ SSD SLOT
 - Validando: la app esta revisando la estructura, el manifiesto y la firma.
 - Listo: el cartucho es valido y puede enviar una orden a Steam.
 - Cartucho invalido: falta metadata, el manifiesto no es valido o la firma no coincide.
-- SSD no coincide: el cartucho pertenece a otro dispositivo registrado.
+- Cartucho antiguo: puede requerir conversion explicita para compartirlo.
 
 Menu lateral
 
@@ -43,6 +44,9 @@ insertado y validado.
 
 Steam
 
+La primera vez en cada PC, añade SteamLibrary del SSD en Steam > Parametros > Almacenamiento si se solicita.
+Antes de retirar el SSD, termina juegos y descargas.
+
 Jugar abre Steam directamente con steam.exe cuando esta disponible.
 Instalar abre Steam con steam://install/{appId}.
 Abrir o instalar automaticamente intenta abrir si Steam reporta el juego
@@ -58,7 +62,7 @@ tray queda activo.
 Seguridad
 
 La app nunca ejecuta binarios desde el SSD. El SSD contiene un manifest.json
-firmado y una carpeta SteamLibrary. La firma se valida antes de habilitar
+V2 con autorizacion cifrada y una carpeta SteamLibrary. Se valida antes de habilitar
 acciones. Si modificas manualmente manifest.json, el cartucho dejara de ser
 valido hasta repararlo, volver a crearlo o actualizarlo desde la app.
 """

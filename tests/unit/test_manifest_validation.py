@@ -7,6 +7,19 @@ from cartridge_launcher.domain.manifest import manifestFromDict
 
 
 class ManifestValidationTests(unittest.TestCase):
+    def testRejectsInvalidIdentityPlatformDateAndTypes(self) -> None:
+        for key, value in (("cartridgeId", "not-a-uuid"), ("displayName", " "),
+                           ("platform", "OTHER"), ("createdAt", "2026-09-08"),
+                           ("schemaVersion", True), ("schemaVersion", 3), ("appId", True)):
+            with self.subTest(key=key, value=value), self.assertRaises(CartridgeError):
+                manifestFromDict({**validManifest(), key: value})
+
+    def testDuplicateKeysAndNonFiniteJsonAreRejected(self) -> None:
+        from cartridge_launcher.domain.manifest import payloadFromBytes
+        for raw in (b'{"schemaVersion":1,"schemaVersion":2}', b'{"extra":NaN}'):
+            with self.assertRaises(CartridgeError):
+                payloadFromBytes(raw)
+
     def testRejectsInvalidAppId(self) -> None:
         with self.assertRaises(CartridgeError) as error:
             manifestFromDict(validManifest(appId="abc"))
@@ -29,7 +42,7 @@ class ManifestValidationTests(unittest.TestCase):
 
 
 def validManifest(appId: str = "111", libraryPath: str = "SteamLibrary"):
-    return {"schemaVersion": 1, "cartridgeId": "cart", "displayName": "Game", "platform": "STEAM", "appId": appId, "libraryPath": libraryPath, "createdAt": "now"}
+    return {"schemaVersion": 1, "cartridgeId": "00000000-0000-4000-8000-000000000001", "displayName": "Game", "platform": "STEAM", "appId": appId, "libraryPath": libraryPath, "createdAt": "2026-09-08T00:00:00Z"}
 
 
 if __name__ == "__main__":

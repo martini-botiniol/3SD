@@ -6,9 +6,30 @@ import subprocess
 import time
 import webbrowser
 from pathlib import Path
+from cartridge_launcher.domain.errors import CartridgeError, ErrorCode
+from cartridge_launcher.infrastructure.steam_vdf import parseVdf
 
 
 class SteamClient:
+    def ensureAvailable(self) -> None:
+        if steamExecutablePath() is None:
+            raise CartridgeError(ErrorCode.STEAM_NOT_FOUND, "Instala Steam para usar el cartucho.")
+
+    def isLibraryRegistered(self, libraryRoot: Path) -> bool:
+        return any(path.resolve() == libraryRoot.resolve() for path in steamLibraryFolders())
+
+    def installationState(self, appId: str, libraryRoot: Path) -> str:
+        path = appManifestPathInLibrary(appId, libraryRoot)
+        if path is None:
+            return "missing"
+        try:
+            state = parseVdf(path.read_text(encoding="utf-8"))["AppState"]
+            flags = int(state.get("StateFlags", "0"))
+            installed = safeInstallDirectory(path, state.get("installdir", ""))
+            return "installed" if flags == 4 and installed is not None else "partial"
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            return "partial"
+
     def openGame(self, appId: str) -> None:
         steamPath = steamExecutablePath()
         if steamPath is not None:
@@ -20,19 +41,19 @@ class SteamClient:
         openSteamUrl(f"steam://install/{appId}")
 
     def isGameInstalled(self, appId: str) -> bool:
-        return appManifestPath(appId) is not None
+        return any(self.isGameInstalledInLibrary(appId, root) for root in steamLibraryFolders())
 
     def isGameInstalledInLibrary(self, appId: str, libraryRoot: Path) -> bool:
-        return appManifestPathInLibrary(appId, libraryRoot) is not None
+        return self.installationState(appId, libraryRoot) == "installed"
 
-    def waitForGameLaunch(self, appId: str, startedAt: float, timeoutSeconds: float = 25.0) -> bool:
-        deadline = time.time() + timeoutSeconds
+    def waitForGameLaunch(self, appId: str, startedAt: float, timeoutSeconds: float = 25.0, libraryRoot: Path | None = None, cancelled=lambda: False) -> bool:
+        deadline = time.monotonic() + timeoutSeconds
         expectedLastPlayed = max(0, int(startedAt) - 2)
-        installDirectory = appInstallDirectory(appId)
-        while time.time() < deadline:
+        installDirectory = appInstallDirectory(appId, libraryRoot)
+        while time.monotonic() < deadline and not cancelled():
             if installDirectory is not None and isProcessRunningUnderDirectory(installDirectory):
                 return True
-            lastPlayed = appLastPlayed(appId)
+            lastPlayed = appLastPlayed(appId, libraryRoot)
             if lastPlayed is not None and lastPlayed >= expectedLastPlayed:
                 return True
             time.sleep(0.5)
@@ -52,8 +73,8 @@ def appManifestPathInLibrary(appId: str, libraryRoot: Path) -> Path | None:
     return manifestPath if manifestPath.is_file() else None
 
 
-def appLastPlayed(appId: str) -> int | None:
-    manifestText = appManifestText(appId)
+def appLastPlayed(appId: str, libraryRoot: Path | None = None) -> int | None:
+    manifestText = appManifestText(appId, libraryRoot)
     if manifestText is None:
         return None
     match = re.search(r'"LastPlayed"\s+"(\d+)"', manifestText)
@@ -62,22 +83,29 @@ def appLastPlayed(appId: str) -> int | None:
     return int(match.group(1))
 
 
-def appInstallDirectory(appId: str) -> Path | None:
-    manifestPath = appManifestPath(appId)
+def appInstallDirectory(appId: str, libraryRoot: Path | None = None) -> Path | None:
+    manifestPath = appManifestPathInLibrary(appId, libraryRoot) if libraryRoot else appManifestPath(appId)
     if manifestPath is None:
         return None
-    manifestText = appManifestText(appId)
+    manifestText = appManifestText(appId, libraryRoot)
     if manifestText is None:
         return None
     match = re.search(r'"installdir"\s+"([^"]+)"', manifestText, flags=re.IGNORECASE)
     if match is None:
         return None
-    installDirectory = manifestPath.parent / "common" / match.group(1)
-    return installDirectory if installDirectory.exists() else None
+    return safeInstallDirectory(manifestPath, match.group(1))
 
 
-def appManifestText(appId: str) -> str | None:
-    manifestPath = appManifestPath(appId)
+def safeInstallDirectory(manifestPath: Path, name: str) -> Path | None:
+    if not name or Path(name).is_absolute():
+        return None
+    common = (manifestPath.parent / "common").resolve()
+    directory = (common / name).resolve()
+    return directory if directory != common and directory.is_relative_to(common) and directory.is_dir() else None
+
+
+def appManifestText(appId: str, libraryRoot: Path | None = None) -> str | None:
+    manifestPath = appManifestPathInLibrary(appId, libraryRoot) if libraryRoot else appManifestPath(appId)
     if manifestPath is None:
         return None
     try:
@@ -116,16 +144,43 @@ def isProcessRunningUnderDirectory(directory: Path) -> bool:
     return result.returncode == 0 and result.stdout.strip() != ""
 
 
-def steamLibraryFolders() -> tuple[Path, ...]:
+def steamInstallRoots() -> tuple[Path, ...]:
     candidates = [
         Path("C:/Program Files (x86)/Steam"),
         Path("C:/Program Files/Steam"),
     ]
-    return tuple(path for path in candidates if path.exists())
+    if os.name == "nt":
+        import winreg
+        for hive, key, value in ((winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam", "SteamPath"),
+                                 (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath"),
+                                 (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam", "InstallPath")):
+            try:
+                with winreg.OpenKey(hive, key) as handle:
+                    candidates.insert(0, Path(winreg.QueryValueEx(handle, value)[0]))
+            except OSError:
+                pass
+    return tuple(dict.fromkeys(path for path in candidates if path.is_dir()))
+
+
+def steamLibraryFolders() -> tuple[Path, ...]:
+    roots = steamInstallRoots()
+    libraries = list(roots)
+    for root in roots:
+        try:
+            values = parseVdf((root / "steamapps" / "libraryfolders.vdf").read_text(encoding="utf-8"))
+            folders = values.get("libraryfolders", values.get("LibraryFolders", {}))
+            for key, item in folders.items():
+                if key.isdigit():
+                    location = item.get("path") if isinstance(item, dict) else item
+                    if isinstance(location, str) and Path(location).is_absolute():
+                        libraries.append(Path(location))
+        except (OSError, ValueError, AttributeError):
+            continue
+    return tuple(dict.fromkeys(libraries))
 
 
 def steamExecutablePath() -> Path | None:
-    for library in steamLibraryFolders():
+    for library in steamInstallRoots():
         candidate = library / "steam.exe"
         if candidate.is_file():
             return candidate
