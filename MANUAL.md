@@ -188,3 +188,8 @@ Cancelar, Escape y X cierran el formulario antes de guardar. Durante la escritur
 espera a que termine antes de cerrar o desconectar el SSD. Los errores y el progreso
 aparecen en el propio formulario. Las notificaciones no abren otra ventana mientras
 está activo. Al terminar, se cierra y se actualiza la biblioteca.
+
+Al expulsar el cartucho activo, la bandeja muestra el aviso de desconexión aunque
+la biblioteca esté abierta. El aviso permanece tres segundos antes de mostrar el
+siguiente evento. Mientras hay un formulario de cartucho abierto, se registra el
+evento sin abrir otra ventana; ese aviso no se reproduce al cerrar el formulario.
