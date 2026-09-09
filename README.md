@@ -74,3 +74,21 @@ V1 conserva compatibilidad local y puede convertirse explícitamente en cualquie
 
 El registro, respaldos, portadas y logs viven en `%USERPROFILE%\.3sd`.
 Consulta [MANUAL.md](MANUAL.md) y la [matriz de aceptación](docs/ACCEPTANCE.md).
+
+
+### Operaciones desde el centro de control
+
+Abre **Opciones de cartucho**, recogida por defecto. Encontrarás **Crear cartucho**,
+**Actualizar cartucho** y la sección **Reparar cartucho**, con **Reparar** y
+**Preparar para usar en cualquier PC**. Windows y Actividad también empiezan recogidas.
+
+Cada operación abre un único formulario: selecciona explícitamente el SSD y después
+el juego por búsqueda o por nombre y AppID. Actualizar muestra el juego actual cuando
+puede leerse; Reparar precarga sus datos y pide confirmación dentro del formulario.
+Preparar conserva el juego y no solicita uno nuevo. No se conserva una selección de
+juego entre operaciones.
+
+Cancelar, Escape y X cierran el formulario antes de guardar. Durante la escritura,
+espera a que termine antes de cerrar o desconectar el SSD. Los errores y el progreso
+aparecen en el propio formulario. Las notificaciones no abren otra ventana mientras
+está activo. Al terminar, se cierra y se actualiza la biblioteca.

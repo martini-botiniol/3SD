@@ -5,6 +5,7 @@ from tkinter import ttk
 from typing import Callable
 
 from cartridge_launcher.ui.app_icon import appIconPath
+from cartridge_launcher.ui.dialog_controller import OperationWindowGate
 from cartridge_launcher.ui.modern_button import ModernButton
 from cartridge_launcher.ui.popup_dedupe import shouldShowPopupKey
 from cartridge_launcher.ui.status_messages import StatusPopupMessage
@@ -21,6 +22,9 @@ class StatusPopup:
         self.activeKey: str | None = None
 
     def show(self, message: StatusPopupMessage) -> None:
+        if OperationWindowGate.isActive():
+            self.dismiss()
+            return
         messageKey = message.key or f"{message.title}:{message.message}"
         if self.window is not None and self.window.winfo_exists() and self.activeKey == messageKey:
             return

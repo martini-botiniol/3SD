@@ -19,12 +19,14 @@ en la biblioteca del cartucho; revisa Steam si el inicio no se confirma.
 
 ## Crear, actualizar y convertir
 
-En Opciones selecciona un disco y busca el juego o introduce su nombre y AppID.
+En **Opciones de cartucho**, abre **Crear cartucho** o **Actualizar cartucho**.
+En el formulario, selecciona primero el disco y busca el juego o introduce su nombre y AppID.
 Crear genera un cartucho V2. Actualizar conserva UUID y fecha de creación y cambia
 el juego; puede hacerse desde cualquier PC con 3SD compatible.
 
-Un V1 válido en su PC puede seguir utilizándose. Para compartirlo, selecciona el
-SSD y pulsa **Preparar para usar en cualquier PC**. No hace falta la PC creadora:
+Un V1 válido en su PC puede seguir utilizándose. Para compartirlo, abre
+**Reparar cartucho > Preparar para usar en cualquier PC** y selecciona el SSD.
+No hace falta la PC creadora:
 la acción acepta expresamente metadata antigua cuya firma puede no verificarse
 localmente. Se validan los campos y se guardan `manifest.json.v1.bak` y
 `signature.sig.v1.bak`, cuando exista firma. Una conexión nunca convierte el SSD.
@@ -168,3 +170,21 @@ sesiones y acciones; `infrastructure` integra Steam, Windows y persistencia;
 Las pruebas automatizadas utilizan directorios temporales y clientes simulados;
 no prueban licencias o juegos reales. Consulta [ACCEPTANCE.md](docs/ACCEPTANCE.md)
 para los escenarios y la validación física pendiente en dos PCs y dos SSD.
+
+
+### Operaciones desde el centro de control
+
+Abre **Opciones de cartucho**, recogida por defecto. Encontrarás **Crear cartucho**,
+**Actualizar cartucho** y la sección **Reparar cartucho**, con **Reparar** y
+**Preparar para usar en cualquier PC**. Windows y Actividad también empiezan recogidas.
+
+Cada operación abre un único formulario: selecciona explícitamente el SSD y después
+el juego por búsqueda o por nombre y AppID. Actualizar muestra el juego actual cuando
+puede leerse; Reparar precarga sus datos y pide confirmación dentro del formulario.
+Preparar conserva el juego y no solicita uno nuevo. No se conserva una selección de
+juego entre operaciones.
+
+Cancelar, Escape y X cierran el formulario antes de guardar. Durante la escritura,
+espera a que termine antes de cerrar o desconectar el SSD. Los errores y el progreso
+aparecen en el propio formulario. Las notificaciones no abren otra ventana mientras
+está activo. Al terminar, se cierra y se actualiza la biblioteca.

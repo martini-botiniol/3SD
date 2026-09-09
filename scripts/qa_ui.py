@@ -59,8 +59,41 @@ def main():
                     root.update()
                     time.sleep(0.01)
                 window.actions.execute.assert_called_once()
+                assert list(window.sidebarSections) == ["cartridges", "repair", "windows", "activity"]
+                assert not any(window.sidebarSectionVisible.values())
+                assert not hasattr(window, "selectedGameTitleText")
+                assert not hasattr(window, "deviceCombo")
+                root.geometry("720x480+20000+20000")
+                root.deiconify()
+                root.update()
+                for operation in ("create", "update", "repair", "convert"):
+                    dialog = window._openCartridgeDialog(operation)
+                    root.update()
+                    assert root.grab_current() == dialog.window
+                    for other in ("create", "update", "repair", "convert"):
+                        assert window._openCartridgeDialog(other) is dialog
+                    assert dialog.operation == operation
+                    assert len([child for child in root.winfo_children() if isinstance(child, tk.Toplevel)]) == 1
+                    for width, height in ((560, 640), (420, 360)):
+                        dialog.window.geometry(f"{width}x{height}")
+                        root.update()
+                        confirm = dialog.confirmButton
+                        assert confirm.winfo_rooty() + confirm.winfo_height() <= dialog.window.winfo_rooty() + height
+                    if operation == "create":
+                        dialog.cancelButton.command()
+                    elif operation == "update":
+                        dialog.window.tk.call(dialog.window.protocol("WM_DELETE_WINDOW"))
+                    elif operation == "repair":
+                        dialog.window.focus_force()
+                        dialog.window.event_generate("<Escape>")
+                        root.update()
+                    else:
+                        dialog.close()
+                    assert dialog.closed, operation
+                    assert not window.dialogController.active
+                    assert root.grab_current() is None
                 assert not errors, errors
-                print("Hidden Tk smoke: library, sidebar, async action, two window sizes OK")
+                print("Tk smoke: library, collapsed sidebar, async action, single modal, Cancel/Escape/X, small windows OK")
         finally:
             root.destroy()
 

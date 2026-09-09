@@ -33,6 +33,7 @@ from cartridge_launcher.services.steam_integration import SteamIntegration
 from cartridge_launcher.ui.app_icon import appIconPath
 from cartridge_launcher.ui.status_messages import StatusPopupMessage, statusPopupDismissMessage, statusPopupKeyFromState, statusPopupMessageFromBlockedCartridge, statusPopupMessageFromState, statusPopupMessageFromSteamAction
 from cartridge_launcher.ui.status_popup import StatusPopup
+from cartridge_launcher.ui.dialog_controller import OperationWindowGate
 
 
 class TrayApp:
@@ -243,6 +244,9 @@ class TrayApp:
     def _processStatusMessages(self) -> None:
         if self.statusPopup is None:
             return
+        suppressed = OperationWindowGate.isActive()
+        if suppressed:
+            self.statusPopup.dismiss()
         while True:
             try:
                 message = self.statusMessages.get_nowait()
@@ -253,6 +257,9 @@ class TrayApp:
                 continue
             messageKey = message.key or f"{message.title}:{message.message}"
             self.queuedStatusPopupKeys.discard(messageKey)
+            if suppressed:
+                self.logger.info("Estado durante formulario: %s", message.message)
+                continue
             if messageKey in self.displayedStatusPopupKeys and not messageKey.startswith("NOT_INSERTED:"):
                 continue
             self.displayedStatusPopupKeys.add(messageKey)
@@ -345,6 +352,9 @@ class TrayApp:
         self.statusMessages.put(statusPopupDismissMessage())
 
     def _notify(self, title: str, message: str) -> None:
+        if OperationWindowGate.isActive():
+            self.logger.info("%s: %s", title, message)
+            return
         try:
             self.icon.notify(message, title)
         except (AttributeError, NotImplementedError):

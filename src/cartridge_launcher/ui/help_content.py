@@ -7,12 +7,16 @@ Flujo recomendado
 
 1. Conecta el SSD que quieres usar como cartucho.
 2. Abre el menu con el boton de tres lineas.
-3. En "Seleccionar SSD y juego", elige el disco.
-4. Escribe el nombre del juego o buscalo por nombre.
-5. Confirma que el Steam AppID sea el correcto.
-6. Abre "Crear cartucho" para preparar un SSD nuevo, "Actualizar cartucho" para reemplazar el juego de un cartucho existente, o "Reparar cartucho" si el SSD aparece como invalido.
-7. En modo automatico, conecta el cartucho y 3SD solicita abrir o instalar en Steam.
-8. Para un cartucho antiguo, pulsa "Preparar para usar en cualquier PC" una vez. No necesitas el equipo creador.
+3. Abre "Opciones de cartucho" y elige Crear o Actualizar cartucho.
+4. En la ventana, selecciona primero el SSD y después el juego: busca por nombre o escribe nombre y AppID.
+5. Confirma la operación. Cada formulario comienza sin disco ni juego seleccionados.
+6. En modo automático, conecta el cartucho y 3SD solicita abrir o instalar en Steam.
+7. Para corregir metadata, abre Reparar cartucho > Reparar y confirma dentro del formulario.
+8. Para un cartucho antiguo, abre Reparar cartucho > Preparar para usar en cualquier PC. Conserva el juego y un respaldo.
+
+Solo se permite un formulario a la vez. Cancelar, Escape y X cierran el formulario;
+durante una escritura debes esperar a que termine. Los errores aparecen dentro
+de la misma ventana y permiten corregir y reintentar. No desconectes el SSD al guardar.
 
 SSD SLOT
 
@@ -27,12 +31,8 @@ Menu lateral
 Las secciones empiezan cerradas para mantener el panel ordenado. Abre solo la
 seccion que necesites:
 
-- Seleccionar SSD y juego: disco, detalles del disco, busqueda en Steam y AppID.
-- Crear cartucho: prepara un SSD nuevo con el juego elegido.
-- Actualizar cartucho: conserva el cartucho y cambia el juego asociado.
-- Reparar cartucho: reconstruye metadata, firma y registro local para un SSD invalido.
-- Cartucho activo: acciones para el SSD conectado en ese momento.
-- Juego seleccionado: acciones para una portada elegida de la biblioteca.
+- Opciones de cartucho: Crear cartucho, Actualizar cartucho y Reparar cartucho.
+- Dentro de Reparar cartucho: Reparar y Preparar para usar en cualquier PC.
 - Windows: activa o desactiva el inicio con Windows.
 - Actividad: ultimos eventos detectados por la app.
 
