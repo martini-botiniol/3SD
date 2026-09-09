@@ -34,7 +34,7 @@ def main() -> None:
     check()
     if args.run:
         from cartridge_launcher.app.main import main as launch
-        raise SystemExit(launch(["tray", "--open-window", "--steam-action", "open"]))
+        raise SystemExit(launch(["tray", "--open-window", "--steam-action", "auto"]))
 
 
 if __name__ == "__main__":

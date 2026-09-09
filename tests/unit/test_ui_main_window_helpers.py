@@ -44,13 +44,13 @@ class UiMainWindowHelperTests(unittest.TestCase):
 
         self.assertEqual(message.dismissAfterMilliseconds, 1200)
 
-    def testRemovedCartridgePopupWaitsForUserAction(self) -> None:
+    def testRemovedCartridgePopupDismissesWithoutUserAction(self) -> None:
         message = statusPopupMessageFromState(AppState(state=LauncherState.NOT_INSERTED, rootPath="G:\\"))
 
-        self.assertEqual(message.title, "Cartucho expulsado")
-        self.assertIn("El SSD cartucho fue expulsado.", message.message)
+        self.assertEqual(message.title, "Cartucho desconectado")
+        self.assertIn("revisa Steam", message.message)
         self.assertIn("G:\\", message.message)
-        self.assertIsNone(message.dismissAfterMilliseconds)
+        self.assertEqual(message.dismissAfterMilliseconds, 3000)
 
     def testBlockedCartridgePopupExplainsActiveCartridgeRule(self) -> None:
         message = statusPopupMessageFromBlockedCartridge("H:\\")
@@ -58,16 +58,15 @@ class UiMainWindowHelperTests(unittest.TestCase):
         self.assertEqual(message.title, "Cartucho en espera")
         self.assertIn("Ya hay un cartucho activo.", message.message)
 
-    def testSelectedGameActionsRequireSelectedCartridgeToBeActive(self) -> None:
+    def testMainActionsRequireConnectedValidCartridge(self) -> None:
+        from unittest.mock import Mock
         window = object.__new__(LauncherWindow)
-        window.selectedCartridgeId = "cart-1"
-        window.currentState = AppState(state=LauncherState.READY, cartridgeId="cart-1")
-
-        self.assertTrue(window._selectedCartridgeIsActive())
-
         window.currentState = AppState(state=LauncherState.NOT_INSERTED)
-
-        self.assertFalse(window._selectedCartridgeIsActive())
+        window.actionText = Mock()
+        window.tasks = Mock()
+        window._runSteamAction("open")
+        window.tasks.submit.assert_not_called()
+        window.actionText.set.assert_called_once()
 
 
 if __name__ == "__main__":

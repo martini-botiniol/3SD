@@ -13,6 +13,10 @@ class FriendlyError:
 
 
 ERROR_MESSAGES = {
+    ErrorCode.UNSUPPORTED_AUTHORIZATION: FriendlyError("Actualiza 3SD", "La autorizacion pertenece a una version mas reciente.", "Actualiza la aplicacion; no repares ni sobrescribas el cartucho."),
+    ErrorCode.CONVERSION_REQUIRED: FriendlyError("Cartucho de version anterior", "Este cartucho necesita prepararse una sola vez.", "Usa Preparar para usar en cualquier PC."),
+    ErrorCode.STORAGE_ERROR: FriendlyError("Datos locales no disponibles", "El registro esta ocupado o dañado.", "Revisa el respaldo del registro y vuelve a intentar."),
+    ErrorCode.LIBRARY_REQUIRED: FriendlyError("Añade la biblioteca a Steam", "Steam aun no reconoce SteamLibrary en este SSD.", "En Steam > Parametros > Almacenamiento, añade la carpeta SteamLibrary del SSD y vuelve a intentar."),
     ErrorCode.INVALID_STRUCTURE: FriendlyError("Cartucho incompleto", "No se encontro la estructura esperada.", "Revisa que el SSD haya sido preparado desde la app."),
     ErrorCode.INVALID_MANIFEST: FriendlyError("Manifiesto invalido", "El archivo manifest.json no se puede leer.", "Vuelve a crear el cartucho."),
     ErrorCode.INVALID_SIGNATURE: FriendlyError("Cartucho modificado", "El cartucho fue modificado o no coincide con su firma.", "Vuelve a preparar este SSD desde la app."),
@@ -28,4 +32,4 @@ ERROR_MESSAGES = {
 
 
 def friendlyErrorFromCode(code: ErrorCode) -> FriendlyError:
-    return ERROR_MESSAGES[code]
+    return ERROR_MESSAGES.get(code, FriendlyError("No se pudo completar", str(code), "Vuelve a intentar."))

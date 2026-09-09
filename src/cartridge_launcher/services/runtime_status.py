@@ -4,6 +4,7 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from cartridge_launcher.infrastructure.storage import atomicWrite
 
 
 RUNTIME_STATUS_TTL_SECONDS = 4.0
@@ -25,7 +26,10 @@ class RuntimeStatusStore:
 
     def write(self, status: RuntimeStatus) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(status.__dict__), encoding="utf-8")
+        atomicWrite(self.path, json.dumps(status.__dict__).encode("utf-8"))
+
+    def clear(self) -> None:
+        self.path.unlink(missing_ok=True)
 
     def read(self) -> RuntimeStatus | None:
         if not self.path.is_file():

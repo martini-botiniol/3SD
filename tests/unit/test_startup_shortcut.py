@@ -9,7 +9,7 @@ from cartridge_launcher.infrastructure import startup_shortcut as startup
 def test_python_startup_has_module_and_no_window_request():
     with patch.object(startup, 'windowPython', return_value=Path('C:/Ruta con espacios/pythonw.exe')):
         command = startup.startupCommand()
-    assert command == ['C:\\Ruta con espacios\\pythonw.exe', '-I', '-m', 'cartridge_launcher.app.main', 'tray', '--steam-action', 'open']
+    assert command == ['C:\\Ruta con espacios\\pythonw.exe', '-I', '-m', 'cartridge_launcher.app.main', 'tray', '--steam-action', 'auto']
     assert '--open-window' not in command
 
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 from pathlib import Path
 
 from cartridge_launcher.infrastructure.logging_config import configureLogging
@@ -8,6 +10,7 @@ from cartridge_launcher.infrastructure.single_instance import SingleInstanceLock
 from cartridge_launcher.infrastructure.startup_shortcut import disableStartup, enableStartup, isStartupEnabled
 from cartridge_launcher.infrastructure.windows_devices import WindowsDeviceScanner
 from cartridge_launcher.services.cartridge_creation_service import CartridgeCreationService
+from cartridge_launcher.services.cartridge_conversion_service import CartridgeConversionService
 from cartridge_launcher.services.cartridge_repair_service import CartridgeRepairService
 from cartridge_launcher.services.cartridge_update_service import CartridgeUpdateService
 from cartridge_launcher.services.local_registry import LocalRegistry
@@ -30,13 +33,20 @@ def buildParser() -> argparse.ArgumentParser:
     ui = subparsers.add_parser("ui")
     ui.add_argument("--from-tray", action="store_true", help=argparse.SUPPRESS)
     tray = subparsers.add_parser("tray")
-    tray.add_argument("--steam-action", choices=("auto", "open", "install", "none"), default="open")
+    tray.add_argument("--steam-action", choices=("auto", "open", "install", "none"), default="auto")
     tray.add_argument("--open-window", action="store_true")
     for name in ("create", "update", "repair"):
         command = subparsers.add_parser(name)
         command.add_argument("--root", required=True)
         command.add_argument("--display-name", required=True)
         command.add_argument("--app-id", required=True)
+    convert = subparsers.add_parser("convert")
+    convert.add_argument("--root", required=True)
+    subparsers.add_parser("self-check")
+    for name in ("install", "uninstall"):
+        command = subparsers.add_parser(name)
+        command.add_argument("--install-directory", type=Path,
+            default=Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "Programs" / "3SD")
     startup = subparsers.add_parser("startup")
     startup.add_argument("action", choices=("enable", "disable", "status"))
     return parser
@@ -59,6 +69,19 @@ def services():
 
 def main(argv: list[str] | None = None) -> int:
     args = buildParser().parse_args(argv)
+    if args.command == "self-check":
+        from cartridge_launcher.infrastructure.standalone_install import selfCheck
+        selfCheck()
+        return 0
+    if args.command in ("install", "uninstall"):
+        from cartridge_launcher.infrastructure.standalone_install import install, uninstall
+        if not getattr(sys, "frozen", False):
+            raise ValueError("Usa estos comandos desde el paquete autonomo 3SD.exe.")
+        if args.command == "install":
+            install(args.install_directory, Path(sys.executable).parent)
+        else:
+            uninstall(args.install_directory)
+        return 0
     if args.command is None:
         args = buildParser().parse_args(["tray", "--open-window"])
     command = args.command or defaultCommand()
@@ -81,6 +104,10 @@ def main(argv: list[str] | None = None) -> int:
         if command == "create":
             manifest = CartridgeCreationService(security, registry, scanner).create(Path(args.root), args.display_name, args.app_id)
             print(f"Cartucho creado: {manifest.displayName}")
+            return 0
+        if command == "convert":
+            manifest = CartridgeConversionService(security, registry, scanner).convert(Path(args.root))
+            print(f"Cartucho portable: {manifest.displayName}")
             return 0
         if command == "update":
             manifest = CartridgeUpdateService(security, registry, scanner).update(Path(args.root), args.display_name, args.app_id)

@@ -43,7 +43,7 @@ def publish(root: Path, runtime: Path, source: Path) -> None:
         "startupEnabled": enabled, "previous": previous,
     }, indent=2), encoding="utf-8")
     pythonw = runtime / "Scripts" / "pythonw.exe"
-    command = [str(pythonw), "-I", "-m", "cartridge_launcher.app.main", "tray", "--steam-action", "open"]
+    command = [str(pythonw), "-I", "-m", "cartridge_launcher.app.main", "tray", "--steam-action", "auto"]
     try:
         if cleanup.is_file():
             shutil.copy2(cleanup, cleanupTarget)
@@ -57,7 +57,7 @@ def publish(root: Path, runtime: Path, source: Path) -> None:
         relative = runtime.relative_to(root)
         launcher.write_text(
             '@echo off\nsetlocal\nstart "" "%~dp0' + str(relative / "Scripts" / "pythonw.exe") +
-            '" -I -m cartridge_launcher.app.main tray --open-window --steam-action open\n', encoding="utf-8")
+            '" -I -m cartridge_launcher.app.main tray --open-window --steam-action auto\n', encoding="utf-8")
         diagnostic.write_text(
             '@echo off\nsetlocal\n"%~dp0' + str(relative / "Scripts" / "python.exe") +
             '" -I -m cartridge_launcher.app.diagnostics %*\nset "RESULT=%ERRORLEVEL%"\npause\nexit /b %RESULT%\n', encoding="utf-8")

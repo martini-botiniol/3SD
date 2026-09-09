@@ -19,7 +19,9 @@ def windowPython() -> Path:
 
 
 def startupCommand() -> list[str]:
-    return [str(windowPython()), "-I", "-m", "cartridge_launcher.app.main", "tray", "--steam-action", "open"]
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "tray", "--steam-action", "auto"]
+    return [str(windowPython()), "-I", "-m", "cartridge_launcher.app.main", "tray", "--steam-action", "auto"]
 
 
 def isStartupEnabled() -> bool:

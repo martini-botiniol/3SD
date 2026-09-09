@@ -2,25 +2,24 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
 from cartridge_launcher.app.state import AppState
 from cartridge_launcher.domain.errors import CartridgeError
-from cartridge_launcher.domain.models import RegisteredCartridge
+from cartridge_launcher.services.steam_action_service import SteamActionService
+from cartridge_launcher.ui.background_tasks import BackgroundTasks
+from cartridge_launcher.ui.cartridge_dialog import CartridgeDialog
+from cartridge_launcher.ui.dialog_controller import DialogController
 from cartridge_launcher.domain.states import LauncherState
 from cartridge_launcher.infrastructure.steam_client import SteamClient
 from cartridge_launcher.infrastructure.steam_store_search import SteamSearchResult, SteamStoreSearchClient
 from cartridge_launcher.infrastructure.startup_shortcut import disableStartup, enableStartup, isStartupEnabled
 from cartridge_launcher.infrastructure.windows_devices import WindowsDeviceScanner
-from cartridge_launcher.services.cartridge_creation_service import CartridgeCreationService
-from cartridge_launcher.services.cartridge_repair_service import CartridgeRepairService
 from cartridge_launcher.services.cartridge_session_service import CartridgeSessionService
-from cartridge_launcher.services.cartridge_update_service import CartridgeUpdateService
 from cartridge_launcher.services.cartridge_validator import CartridgeValidator
 from cartridge_launcher.services.cartridge_watch_service import CartridgeWatchService
-from cartridge_launcher.services.device_monitor import DeviceChange, DeviceMonitor
+from cartridge_launcher.services.device_monitor import DeviceMonitor
 from cartridge_launcher.services.local_registry import LocalRegistry
 from cartridge_launcher.services.runtime_status import RuntimeStatus, defaultRuntimeStatusStore
 from cartridge_launcher.services.security_service import SecurityService
@@ -30,9 +29,9 @@ from cartridge_launcher.ui.cover_cache import CoverCache
 from cartridge_launcher.ui.error_messages import friendlyErrorFromCode
 from cartridge_launcher.ui.help_content import helpText, helpTitle
 from cartridge_launcher.ui.modern_button import ModernButton
-from cartridge_launcher.ui.status_messages import StatusPopupMessage, statusPopupKeyFromState, statusPopupMessageFromBlockedCartridge, statusPopupMessageFromState
+from cartridge_launcher.ui.status_messages import StatusPopupMessage, statusPopupKeyFromState, statusPopupMessageFromState
 from cartridge_launcher.ui.status_popup import StatusPopup
-from cartridge_launcher.ui.view_models import LibraryCardViewModel, formatCapacity, libraryAdvancedDetails, libraryCardsWithState, libraryDetailFromRegistry, librarySelectionSummary, steamLibraryCoverUrl, viewModelFromState
+from cartridge_launcher.ui.view_models import LibraryCardViewModel, libraryCardsWithState, libraryDetailFromRegistry, librarySelectionSummary, steamLibraryCoverUrl, viewModelFromState
 
 
 class LauncherWindow:
@@ -49,35 +48,27 @@ class LauncherWindow:
         self.logger = logger
         self.intervalMilliseconds = intervalMilliseconds
         self.suppressStatePopups = suppressStatePopups
-        self.coverCache = CoverCache(Path.home() / ".3sd" / "covers")
+        self.tasks = BackgroundTasks(root)
+        self.generation = 0
+        self.coverCache = CoverCache(Path.home() / ".3sd" / "covers", self.tasks, self._refreshLibrary)
+        self.actions = SteamActionService(CartridgeValidator(security, registry), deviceScanner,
+            steamIntegration.steamClient, self.runtimeStatusStore)
         self.currentState = self.sessionService.initialState()
         self.sidebarVisible = False
         self.libraryCards: tuple[LibraryCardViewModel, ...] = ()
         self.libraryColumnCount = 0
         self.statusPopup = StatusPopup(root)
+        self.dialogController = DialogController(self._makeCartridgeDialog, self.statusPopup.dismiss)
+        self.root.protocol("WM_DELETE_WINDOW", self._close)
         self.titleText = tk.StringVar()
         self.subtitleText = tk.StringVar()
         self.detailText = tk.StringVar()
         self.statusText = tk.StringVar()
         self.actionText = tk.StringVar(value="")
-        self.selectedDeviceText = tk.StringVar()
-        self.createDisplayNameText = tk.StringVar()
-        self.createAppIdText = tk.StringVar()
-        self.deviceDetailsText = tk.StringVar(value="")
-        self.deviceDetailsVisible = False
-        self.selectedGameTitleText = tk.StringVar(value="Selecciona un juego")
-        self.selectedGameDetailText = tk.StringVar(value="Elige una portada para ver acciones y detalles.")
-        self.selectedGameAdvancedText = tk.StringVar(value="")
-        self.selectedGameAdvancedVisible = False
-        self.selectedAppId: str | None = None
-        self.selectedCartridgeId: str | None = None
-        self.searchResultText = tk.StringVar(value="")
         self.stateTechnicalDetailText = tk.StringVar(value="")
         self.stateTechnicalVisible = False
         self.startupStatusText = tk.StringVar(value="")
         self.startupEnabledValue = tk.BooleanVar(value=False)
-        self.deviceOptions: dict[str, str] = {}
-        self.searchResults: dict[str, SteamSearchResult] = {}
         self.sidebarSections: dict[str, ttk.Frame] = {}
         self.sidebarSectionLabels: dict[str, tk.StringVar] = {}
         self.sidebarSectionVisible: dict[str, bool] = {}
@@ -92,7 +83,6 @@ class LauncherWindow:
         self._configureStyles()
         self._build()
         self._refreshStartupState()
-        self._refreshDevices(showResult=False)
         self._render(self.currentState)
         self._refreshLibrary()
         self._scanExisting()
@@ -205,86 +195,35 @@ class LauncherWindow:
         self.sidebar.columnconfigure(0, weight=1)
         self.sidebar.columnconfigure(1, weight=1)
         ttk.Label(self.sidebar, text="Centro de control", style="Panel.TLabel", font=("Segoe UI", 16, "bold")).grid(row=0, column=0, columnspan=2, sticky="w")
-        setupSection = self._addSidebarSection(1, "setup", "Seleccionar SSD y juego", "Elige el disco y el juego que usaras en las acciones de cartucho.")
-        createSection = self._addSidebarSection(4, "create", "Crear cartucho", "Prepara un SSD nuevo con el juego seleccionado.")
-        updateSection = self._addSidebarSection(7, "update", "Actualizar cartucho", "Reemplaza el juego asociado al SSD seleccionado.")
-        repairSection = self._addSidebarSection(10, "repair", "Reparar cartucho", "Reescribe metadata y firma para un SSD que no valida.")
-        activeSection = self._addSidebarSection(13, "active", "Cartucho activo", "Acciones para el SSD conectado ahora.")
-        selectedSection = self._addSidebarSection(16, "selected", "Juego seleccionado", "Acciones para una portada elegida de la biblioteca.")
-        windowsSection = self._addSidebarSection(19, "windows", "Windows", "Configura como se comporta la app al iniciar.")
-        activitySection = self._addSidebarSection(22, "activity", "Actividad", "Eventos recientes del launcher.")
-        self._buildSetupSection(setupSection)
-        ModernButton(createSection, text="Crear cartucho", command=self._createCartridge, variant="accent", background="#1a2228", width=244).grid(row=1, column=0, columnspan=2, sticky="we", pady=(10, 0))
-        ModernButton(updateSection, text="Cambiar juego del cartucho", command=self._updateCartridge, variant="accent", background="#1a2228", width=244).grid(row=1, column=0, columnspan=2, sticky="we", pady=(10, 8))
-        ttk.Label(updateSection, text="Para quitar el juego actual y poner otro, selecciona el SSD, elige el nuevo juego y usa Cambiar juego.", style="PanelMuted.TLabel", wraplength=260).grid(row=2, column=0, columnspan=2, sticky="we")
-        ModernButton(repairSection, text="Reparar cartucho", command=self._repairCartridge, variant="accent", background="#1a2228", width=244).grid(row=1, column=0, columnspan=2, sticky="we", pady=(10, 8))
-        ttk.Label(repairSection, text="Usalo si el SSD aparece como invalido. Repara manifest, firma, registro local y elimina metadata ejecutable dentro de .cartridge.", style="PanelMuted.TLabel", wraplength=260).grid(row=2, column=0, columnspan=2, sticky="we")
-        self.openButton = ModernButton(activeSection, text="Abrir", command=lambda: self._runSteamAction("open"), background="#1a2228")
-        self.openButton.grid(row=1, column=0, sticky="we", padx=(0, 6), pady=(10, 8))
-        self.installButton = ModernButton(activeSection, text="Instalar", command=lambda: self._runSteamAction("install"), background="#1a2228")
-        self.installButton.grid(row=1, column=1, sticky="we", pady=(10, 8))
-        self.autoButton = ModernButton(activeSection, text="Abrir o instalar automaticamente", command=lambda: self._runSteamAction("auto"), background="#1a2228", width=244)
-        self.autoButton.grid(row=2, column=0, columnspan=2, sticky="we")
-        ttk.Label(selectedSection, textvariable=self.selectedGameTitleText, style="Panel.TLabel", font=("Segoe UI", 11, "bold"), wraplength=260).grid(row=1, column=0, columnspan=2, sticky="we", pady=(10, 0))
-        ttk.Label(selectedSection, textvariable=self.selectedGameDetailText, style="PanelMuted.TLabel", wraplength=260).grid(row=2, column=0, columnspan=2, sticky="we", pady=(6, 8))
-        ModernButton(selectedSection, text="Detalles", command=self._toggleSelectedGameAdvancedDetails, background="#1a2228", width=244).grid(row=3, column=0, columnspan=2, sticky="we", pady=(0, 8))
-        self.selectedGameAdvancedLabel = ttk.Label(selectedSection, textvariable=self.selectedGameAdvancedText, style="PanelMuted.TLabel", wraplength=260)
-        self.selectedOpenButton = ModernButton(selectedSection, text="Abrir", command=lambda: self._runSelectedSteamAction("open"), background="#1a2228")
-        self.selectedOpenButton.grid(row=5, column=0, sticky="we", padx=(0, 6))
-        self.selectedInstallButton = ModernButton(selectedSection, text="Instalar", command=lambda: self._runSelectedSteamAction("install"), background="#1a2228")
-        self.selectedInstallButton.grid(row=5, column=1, sticky="we")
-        ModernButton(selectedSection, text="Eliminar registro", command=self._deleteSelectedLibraryCard, background="#1a2228", width=244).grid(row=6, column=0, columnspan=2, sticky="we", pady=(8, 0))
+        cartridges = self._addSidebarSection(1, "cartridges", "Opciones de cartucho", "")
+        ModernButton(cartridges, text="Crear cartucho", command=self._createCartridge, variant="accent", background="#1a2228", width=244).grid(row=1, column=0, columnspan=2, sticky="we", pady=(0, 8))
+        ModernButton(cartridges, text="Actualizar cartucho", command=self._updateCartridge, background="#1a2228", width=244).grid(row=2, column=0, columnspan=2, sticky="we")
+        repair = self._addSidebarSection(3, "repair", "Reparar cartucho", "", parent=cartridges)
+        ModernButton(repair, text="Reparar", command=self._repairCartridge, background="#1a2228", width=244).grid(row=1, column=0, columnspan=2, sticky="we", pady=(0, 8))
+        ModernButton(repair, text="Preparar para usar en cualquier PC", command=self._convertCartridge, background="#1a2228", width=244).grid(row=2, column=0, columnspan=2, sticky="we")
+        windowsSection = self._addSidebarSection(4, "windows", "Windows", "Configura cómo se comporta la app al iniciar.")
+        activitySection = self._addSidebarSection(7, "activity", "Actividad", "Eventos recientes del launcher.")
         self.startupToggle = ttk.Checkbutton(windowsSection, text="Iniciar con Windows", variable=self.startupEnabledValue, command=self._toggleStartup)
         self.startupToggle.grid(row=1, column=0, columnspan=2, sticky="w", pady=(10, 0))
         ttk.Label(windowsSection, textvariable=self.startupStatusText, style="PanelMuted.TLabel", wraplength=260).grid(row=2, column=0, columnspan=2, sticky="we", pady=(6, 0))
         self.activityLabel = ttk.Label(activitySection, text="Sin actividad reciente.", style="PanelMuted.TLabel", wraplength=260)
         self.activityLabel.grid(row=1, column=0, columnspan=2, sticky="we", pady=(10, 0))
-        ModernButton(self.sidebar, text="Actualizar biblioteca", command=self._refreshLibrary, background="#1a2228", width=244).grid(row=25, column=0, columnspan=2, sticky="we", pady=(22, 8))
-        ttk.Label(self.sidebar, textvariable=self.actionText, style="PanelMuted.TLabel", wraplength=260).grid(row=26, column=0, columnspan=2, sticky="we", pady=(10, 0))
+        ModernButton(self.sidebar, text="Actualizar biblioteca", command=self._refreshLibrary, background="#1a2228", width=244).grid(row=10, column=0, columnspan=2, sticky="we", pady=(22, 8))
+        ttk.Label(self.sidebar, textvariable=self.actionText, style="PanelMuted.TLabel", wraplength=260).grid(row=11, column=0, columnspan=2, sticky="we", pady=(10, 0))
 
-    def _buildSetupSection(self, setupSection) -> None:
-        ttk.Label(setupSection, text="Disco", style="Panel.TLabel").grid(row=1, column=0, sticky="w", pady=(10, 0))
-        self.deviceCombo = ttk.Combobox(setupSection, textvariable=self.selectedDeviceText, width=26, state="readonly", style="Modern.TCombobox")
-        self.deviceCombo.grid(row=2, column=0, columnspan=2, sticky="we", pady=(4, 8))
-        self.deviceCombo.bind("<<ComboboxSelected>>", lambda event: self._renderDeviceDetails())
-        ModernButton(setupSection, text="Actualizar", command=self._refreshDevices, background="#1a2228").grid(row=3, column=0, sticky="we", padx=(0, 6), pady=(0, 10))
-        ModernButton(setupSection, text="Detalles", command=self._toggleDeviceDetails, background="#1a2228").grid(row=3, column=1, sticky="we", pady=(0, 10))
-        self.deviceDetailsLabel = ttk.Label(setupSection, textvariable=self.deviceDetailsText, style="PanelMuted.TLabel", wraplength=260)
-        ttk.Label(setupSection, text="Nombre del juego", style="Panel.TLabel").grid(row=5, column=0, sticky="w")
-        self._modernEntry(setupSection, self.createDisplayNameText).grid(row=6, column=0, columnspan=2, sticky="we", pady=(4, 10))
-        ttk.Label(setupSection, text="Steam AppID", style="Panel.TLabel").grid(row=7, column=0, sticky="w")
-        self._modernEntry(setupSection, self.createAppIdText).grid(row=8, column=0, columnspan=2, sticky="we", pady=(4, 12))
-        ModernButton(setupSection, text="Buscar por nombre", command=self._searchSteamGame, background="#1a2228", width=244).grid(row=9, column=0, columnspan=2, sticky="we", pady=(0, 8))
-        self.searchCombo = ttk.Combobox(setupSection, textvariable=self.searchResultText, width=26, state="readonly", style="Modern.TCombobox")
-        self.searchCombo.grid(row=10, column=0, columnspan=2, sticky="we", pady=(0, 8))
-        self.searchCombo.bind("<<ComboboxSelected>>", lambda event: self._selectSteamSearchResult())
-
-    def _modernEntry(self, master, textvariable: tk.StringVar) -> tk.Entry:
-        return tk.Entry(
-            master,
-            textvariable=textvariable,
-            bg="#20282f",
-            fg="#f4f7f5",
-            insertbackground="#f4f7f5",
-            relief="flat",
-            bd=0,
-            highlightthickness=1,
-            highlightbackground="#34434c",
-            highlightcolor="#49b86f",
-            font=("Segoe UI", 10),
-        )
-
-    def _addSidebarSection(self, row: int, key: str, title: str, description: str) -> ttk.Frame:
-        labelText = tk.StringVar(value=f"[+] {title}")
+    def _addSidebarSection(self, row: int, key: str, title: str, description: str, parent=None) -> ttk.Frame:
+        parent = self.sidebar if parent is None else parent
+        labelText = tk.StringVar(value=f"▸ {title}")
         self.sidebarSectionLabels[key] = labelText
         self.sidebarSectionVisible[key] = False
-        ttk.Separator(self.sidebar).grid(row=row, column=0, columnspan=2, sticky="we", pady=(14, 10))
-        ModernButton(self.sidebar, textvariable=labelText, command=lambda: self._toggleSidebarSection(key, title), background="#1a2228", width=244).grid(row=row + 1, column=0, columnspan=2, sticky="we")
-        body = ttk.Frame(self.sidebar, style="Panel.TFrame")
+        ttk.Separator(parent).grid(row=row, column=0, columnspan=2, sticky="we", pady=(14, 10))
+        ModernButton(parent, textvariable=labelText, command=lambda: self._toggleSidebarSection(key, title), background="#1a2228", width=244).grid(row=row + 1, column=0, columnspan=2, sticky="we")
+        body = ttk.Frame(parent, style="Panel.TFrame")
         body.grid(row=row + 2, column=0, columnspan=2, sticky="we", pady=(8, 0))
         body.columnconfigure(0, weight=1)
         body.columnconfigure(1, weight=1)
-        ttk.Label(body, text=description, style="PanelMuted.TLabel", wraplength=260).grid(row=0, column=0, columnspan=2, sticky="we")
+        if description:
+            ttk.Label(body, text=description, style="PanelMuted.TLabel", wraplength=260).grid(row=0, column=0, columnspan=2, sticky="we")
         body.grid_remove()
         self.sidebarSections[key] = body
         return body
@@ -294,10 +233,10 @@ class LauncherWindow:
         isVisible = self.sidebarSectionVisible[key]
         if isVisible:
             section.grid_remove()
-            self.sidebarSectionLabels[key].set(f"[+] {title}")
+            self.sidebarSectionLabels[key].set(f"▸ {title}")
         else:
             section.grid()
-            self.sidebarSectionLabels[key].set(f"[-] {title}")
+            self.sidebarSectionLabels[key].set(f"▾ {title}")
         self.sidebarSectionVisible[key] = not isVisible
         self._updateSidebarScrollregion()
 
@@ -309,7 +248,11 @@ class LauncherWindow:
         self.sidebarVisible = not self.sidebarVisible
 
     def _showHelp(self) -> None:
-        messagebox.showinfo(helpTitle, helpText)
+        if self.dialogController.active:
+            if self.dialogController.dialog is not None:
+                self.dialogController.dialog.focus()
+            return
+        messagebox.showinfo(helpTitle, helpText, parent=self.root)
 
     def _toggleStateTechnicalDetails(self) -> None:
         self.stateTechnicalVisible = not self.stateTechnicalVisible
@@ -353,6 +296,8 @@ class LauncherWindow:
             canvas.yview_scroll(units, "units")
 
     def _activeScrollCanvas(self) -> tk.Canvas | None:
+        if self.dialogController.active:
+            return None
         widget = self.root.winfo_containing(self.root.winfo_pointerx(), self.root.winfo_pointery())
         if self._isDescendantOf(widget, self.sidebarCanvas) or self._isDescendantOf(widget, self.sidebar):
             return self.sidebarCanvas
@@ -367,27 +312,6 @@ class LauncherWindow:
                 return True
             current = getattr(current, "master", None)
         return False
-
-    def _toggleDeviceDetails(self) -> None:
-        self.deviceDetailsVisible = not self.deviceDetailsVisible
-        self._renderDeviceDetails()
-
-    def _renderDeviceDetails(self) -> None:
-        label = self.selectedDeviceText.get()
-        rootPath = self.deviceOptions.get(label)
-        if rootPath is None:
-            self.deviceDetailsText.set("")
-            self.deviceDetailsLabel.grid_remove()
-            return
-        device = self.deviceScanner.scan().get(rootPath)
-        if device is None:
-            self.deviceDetailsText.set("El disco seleccionado ya no esta disponible.")
-        else:
-            self.deviceDetailsText.set(f"Ruta: {device.rootPath}\nSerial: {device.volumeSerialNumber}\nCapacidad: {formatCapacity(device.capacityBytes)}")
-        if self.deviceDetailsVisible:
-            self.deviceDetailsLabel.grid(row=4, column=0, columnspan=2, sticky="we", pady=(0, 10))
-        else:
-            self.deviceDetailsLabel.grid_remove()
 
     def _refreshStartupState(self) -> None:
         enabled = isStartupEnabled()
@@ -407,26 +331,43 @@ class LauncherWindow:
             self.actionText.set("No se pudo actualizar el inicio con Windows.")
 
     def _scanExisting(self) -> None:
-        for state in self.sessionService.handleExisting(self.deviceScanner.scan()):
-            self._render(state, showPopup=False)
+        def complete(states):
+            for state in states:
+                self._render(state, showPopup=False)
+                self._autoLaunch(state)
+        self.tasks.submit("poll", lambda: self.sessionService.handleExisting(self.deviceScanner.scan()),
+                          complete, lambda exc: self.actionText.set(str(exc)))
 
     def _poll(self) -> None:
-        snapshot = self.monitor.pollOnce()
-        for change in snapshot.removed:
-            for state in self.sessionService.handleRemoved(change):
+        def scan():
+            snapshot = self.monitor.pollOnce()
+            states = []
+            for change in snapshot.removed:
+                states.extend(self.sessionService.handleRemoved(change))
+            for change in snapshot.inserted + snapshot.updated:
+                states.extend(self.sessionService.handleInserted(change))
+            return states
+        def complete(states):
+            for state in states:
+                if state.state == LauncherState.NOT_INSERTED:
+                    self.generation += 1
+                    self.runtimeStatusStore.clear()
                 self._render(state)
-        for change in snapshot.inserted:
-            if self.sessionService.isBlockedByActiveCartridge(change):
-                message = statusPopupMessageFromBlockedCartridge(str(change.root))
-                self._showStatusPopup(message)
-                self._addActivity("Cartucho ignorado: ya hay un cartucho activo.", message.key)
-                continue
-            for state in self.sessionService.handleInserted(change):
-                self._render(state)
-        self._renderRuntimeStatus()
+                self._autoLaunch(state)
+            self._renderRuntimeStatus()
+            if self.sessionService.waiting:
+                self.actionText.set("Hay cartuchos en espera. Se activaran al retirar el actual.")
+        self.tasks.submit("poll", scan, complete,
+                          lambda exc: self.actionText.set("No se pudo leer el disco; vuelve a conectarlo."))
         self.root.after(self.intervalMilliseconds, self._poll)
 
+    def _autoLaunch(self, state) -> None:
+        if not self.suppressStatePopups and self.sessionService.shouldRunSteamAction(state):
+            self._runSteamAction("auto")
+
     def _render(self, state: AppState, showPopup: bool = True) -> None:
+        if (state.rootPath, state.manifest, state.state) != (self.currentState.rootPath, self.currentState.manifest, self.currentState.state):
+            self.generation += 1
         self.currentState = state
         state = self._stateWithRuntimeStatus(state)
         viewModel = viewModelFromState(state)
@@ -438,14 +379,9 @@ class LauncherWindow:
         if not viewModel.technicalDetail or not self.stateTechnicalVisible:
             self.stateTechnicalLabel.grid_remove()
         buttonState = "normal" if viewModel.canRunSteamAction else "disabled"
-        self.openButton.configure(state=buttonState)
-        self.installButton.configure(state=buttonState)
-        self.autoButton.configure(state=buttonState)
         self.slotPlayButton.configure(state=buttonState)
         self.slotInstallButton.configure(state=buttonState)
-        self._syncSelectedActionButtons()
         self._renderSlot(state)
-        self._syncRegistryFromReadyState(state)
         self._addActivity(activityTextFromState(state), activityKeyFromState(state))
         self._refreshLibrary()
         if showPopup:
@@ -474,7 +410,7 @@ class LauncherWindow:
         runtimeStatus = self.runtimeStatusStore.read()
         if runtimeStatus is None or state.cartridgeId != runtimeStatus.cartridgeId:
             return state
-        runtimeState = LauncherState.GAME_RUNNING if runtimeStatus.phase == "running" else LauncherState.OPENING if runtimeStatus.action == "open" else LauncherState.NOT_INSTALLED
+        runtimeState = LauncherState.READY if runtimeStatus.phase == "unconfirmed" else LauncherState.GAME_RUNNING if runtimeStatus.phase == "running" else LauncherState.OPENING if runtimeStatus.action == "open" else LauncherState.NOT_INSTALLED
         message = runtimeStatusMessage(runtimeStatus)
         return AppState(
             state=runtimeState,
@@ -493,27 +429,28 @@ class LauncherWindow:
             return
         self._showStatusPopup(message)
 
-    def _syncRegistryFromReadyState(self, state: AppState) -> None:
-        if state.state != LauncherState.READY or state.manifest is None or state.rootPath is None:
-            return
-        device = self.deviceScanner.scan().get(state.rootPath)
-        if device is None:
-            return
-        self.registry.upsert(RegisteredCartridge(state.manifest.cartridgeId, state.manifest.appId, device.volumeSerialNumber, device.capacityBytes, state.manifest.displayName))
-
     def _onCardsCanvasConfigure(self, event) -> None:
         self.cardsCanvas.itemconfigure(self.cardsCanvasWindow, width=event.width)
         self._renderLibraryCards(event.width)
 
     def _refreshLibrary(self) -> None:
         activeCartridgeId = self.currentState.cartridgeId if self.currentState.state == LauncherState.READY else None
-        self.libraryCards = libraryCardsWithState(self.registry.all(), activeCartridgeId)
+        try:
+            self.libraryCards = libraryCardsWithState(self.registry.all(), activeCartridgeId)
+            if self.registry.warning:
+                self.actionText.set(self.registry.warning)
+        except CartridgeError as exc:
+            self.actionText.set(exc.message)
+            self.libraryCards = ()
         self._renderLibraryCards(max(self.cardsCanvas.winfo_width(), 1))
 
     def _renderLibraryCards(self, availableWidth: int) -> None:
         for child in self.cardsFrame.winfo_children():
             child.destroy()
         columnCount = max(1, availableWidth // 190)
+        if not self.libraryCards:
+            ttk.Label(self.cardsFrame, text="Conecta un cartucho para comenzar.\nPuedes preparar un SSD desde Opciones.",
+                      style="PanelMuted.TLabel").grid(row=0, column=0, padx=16, pady=24)
         for index, card in enumerate(self.libraryCards):
             frame = ttk.Frame(self.cardsFrame, style="ActiveCard.TFrame" if card.isActive else "Card.TFrame", padding=12)
             frame.grid(row=index // columnCount, column=index % columnCount, sticky="nw", padx=(0, 12), pady=(0, 12))
@@ -541,177 +478,62 @@ class LauncherWindow:
 
     def _selectLibraryCard(self, cartridgeId: str) -> None:
         cartridge = self.registry.get(cartridgeId)
-        if cartridge is None:
-            return
-        detail = libraryDetailFromRegistry(cartridge)
-        self.selectedAppId = detail.appId
-        self.selectedCartridgeId = detail.cartridgeId
-        self.selectedGameTitleText.set(detail.title)
-        self.selectedGameDetailText.set(librarySelectionSummary(detail))
-        self.selectedGameAdvancedText.set(libraryAdvancedDetails(detail))
-        if self.selectedGameAdvancedVisible:
-            self.selectedGameAdvancedLabel.grid(row=4, column=0, columnspan=2, sticky="we", pady=(0, 8))
-        self._syncSelectedActionButtons()
+        if cartridge is not None:
+            self.actionText.set(librarySelectionSummary(libraryDetailFromRegistry(cartridge)))
 
-    def _toggleSelectedGameAdvancedDetails(self) -> None:
-        self.selectedGameAdvancedVisible = not self.selectedGameAdvancedVisible
-        if self.selectedGameAdvancedVisible and self.selectedGameAdvancedText.get():
-            self.selectedGameAdvancedLabel.grid(row=4, column=0, columnspan=2, sticky="we", pady=(0, 8))
-        else:
-            self.selectedGameAdvancedLabel.grid_remove()
+    def _makeCartridgeDialog(self, operation, onClosed):
+        return CartridgeDialog(self.root, operation, self.security, self.registry,
+            self.deviceScanner, self.steamSearchClient, self.tasks, self._cartridgeSaved, onClosed)
 
-    def _deleteSelectedLibraryCard(self) -> None:
-        if self.selectedCartridgeId is None:
-            self.actionText.set("Selecciona un juego de la biblioteca.")
-            return
-        cartridge = self.registry.get(self.selectedCartridgeId)
-        if cartridge is None:
-            self.actionText.set("Ese registro ya no existe.")
-            self.selectedCartridgeId = None
-            self.selectedAppId = None
-            self._syncSelectedActionButtons()
-            self._refreshLibrary()
-            return
-        if not messagebox.askyesno("Eliminar registro", f"Eliminar {cartridge.displayName or cartridge.appId} de la biblioteca local?\n\nEsto no borra archivos del SSD."):
-            return
-        if self.registry.delete(cartridge.cartridgeId):
-            self.actionText.set("Registro eliminado de la biblioteca.")
-            self.selectedCartridgeId = None
-            self.selectedAppId = None
-            self.selectedGameTitleText.set("Selecciona un juego")
-            self.selectedGameDetailText.set("Elige una portada para ver acciones y detalles.")
-            self.selectedGameAdvancedText.set("")
-            self.selectedGameAdvancedLabel.grid_remove()
-            self._syncSelectedActionButtons()
-            self._refreshLibrary()
+    def _cartridgeSaved(self, manifest):
+        self.actionText.set(f"Cartucho listo: {manifest.displayName}")
+        self._scanExisting()
+        self._refreshLibrary()
 
-    def _refreshDevices(self, showResult: bool = True) -> None:
-        devices = self.deviceScanner.scan()
-        self.deviceOptions = {f"{device.rootPath} ({device.volumeSerialNumber})": root for root, device in devices.items()}
-        self.deviceCombo["values"] = tuple(self.deviceOptions.keys())
-        if self.deviceOptions and self.selectedDeviceText.get() not in self.deviceOptions:
-            self.selectedDeviceText.set(next(iter(self.deviceOptions)))
-        if showResult:
-            self.actionText.set(f"Discos detectados: {len(self.deviceOptions)}")
-        self._renderDeviceDetails()
+    def _close(self):
+        if self.dialogController.close():
+            self.root.destroy()
 
-    def _searchSteamGame(self) -> None:
-        term = self.createDisplayNameText.get().strip()
-        if not term:
-            self.actionText.set("Escribe un nombre para buscar.")
-            return
-        try:
-            results = self.steamSearchClient.search(term)
-        except Exception:
-            self.actionText.set("Busqueda de Steam no disponible.")
-            return
-        self.searchResults = {steamSearchResultLabel(result): result for result in results}
-        self.searchCombo["values"] = tuple(self.searchResults.keys())
-        if self.searchResults:
-            self.searchResultText.set(next(iter(self.searchResults)))
-            self._selectSteamSearchResult()
+    def _openCartridgeDialog(self, operation):
+        dialog = self.dialogController.open(operation)
+        if dialog is None:
+            self.actionText.set("Ya hay una operación abierta en otra ventana de 3SD.")
+        return dialog
 
-    def _selectSteamSearchResult(self) -> None:
-        result = self.searchResults.get(self.searchResultText.get())
-        if result is not None:
-            self.createDisplayNameText.set(result.displayName)
-            self.createAppIdText.set(result.appId)
+    def _createCartridge(self):
+        return self._openCartridgeDialog("create")
 
-    def _createCartridge(self) -> None:
-        rootPath = self.deviceOptions.get(self.selectedDeviceText.get())
-        if rootPath is None:
-            self.actionText.set("Selecciona un SSD.")
-            return
-        try:
-            manifest = CartridgeCreationService(self.security, self.registry, self.deviceScanner).create(Path(rootPath), self.createDisplayNameText.get(), self.createAppIdText.get())
-            self.actionText.set(f"Cartucho creado: {manifest.displayName}")
-            self._refreshLibrary()
-        except CartridgeError as exc:
-            friendly = friendlyErrorFromCode(exc.code)
-            self.actionText.set(f"{friendly.title}: {friendly.message}")
+    def _updateCartridge(self):
+        return self._openCartridgeDialog("update")
 
-    def _updateCartridge(self) -> None:
-        rootPath = self.deviceOptions.get(self.selectedDeviceText.get())
-        if rootPath is None:
-            self.actionText.set("Selecciona un SSD.")
-            return
-        try:
-            manifest = CartridgeUpdateService(self.security, self.registry, self.deviceScanner).update(Path(rootPath), self.createDisplayNameText.get(), self.createAppIdText.get())
-            self.actionText.set(f"Juego cambiado: {manifest.displayName}")
-            self._refreshLibrary()
-        except CartridgeError as exc:
-            friendly = friendlyErrorFromCode(exc.code)
-            self.actionText.set(f"{friendly.title}: {friendly.message}")
+    def _repairCartridge(self):
+        return self._openCartridgeDialog("repair")
 
-    def _repairCartridge(self) -> None:
-        rootPath = self.deviceOptions.get(self.selectedDeviceText.get())
-        if rootPath is None:
-            self.actionText.set("Selecciona un SSD.")
-            return
-        try:
-            manifest = CartridgeRepairService(self.security, self.registry, self.deviceScanner).repair(Path(rootPath), self.createDisplayNameText.get(), self.createAppIdText.get())
-            self.actionText.set(f"Cartucho reparado: {manifest.displayName}")
-            self._refreshLibrary()
-            self._scanExisting()
-        except CartridgeError as exc:
-            friendly = friendlyErrorFromCode(exc.code)
-            self.actionText.set(f"{friendly.title}: {friendly.message}")
+    def _convertCartridge(self):
+        return self._openCartridgeDialog("convert")
 
     def _runSteamAction(self, steamAction: str) -> None:
         state = self.currentState
         if state.state != LauncherState.READY or state.manifest is None:
-            self.actionText.set("No hay cartucho listo.")
+            self.actionText.set("Conecta un cartucho valido para continuar.")
             return
-        action = "open" if steamAction == "auto" else steamAction
-        self._showSteamAction(state.manifest.displayName, action)
-        try:
-            if steamAction == "open":
-                self.steamIntegration.openGame(state.manifest.appId)
-                if self.steamIntegration.waitForGameLaunch(state.manifest.appId, time.time()):
-                    self.actionText.set(f"Juego iniciado: {state.manifest.displayName}")
-                    return
-            elif steamAction == "install":
-                self.steamIntegration.installGame(state.manifest.appId)
-            else:
-                libraryRoot = Path(state.rootPath) / state.manifest.libraryPath if state.rootPath is not None else None
-                action = self.steamIntegration.runAutoAction(state.manifest.appId, libraryRoot)
-                if action == "open" and self.steamIntegration.waitForGameLaunch(state.manifest.appId, time.time()):
-                    self.actionText.set(f"Juego iniciado: {state.manifest.displayName}")
-                    return
-            self._finishSteamAction(state.manifest.displayName, action)
-        except Exception as exc:
-            self.logger.warning("UI Steam action failed: %s", exc)
-            self.actionText.set("Steam no pudo completar la accion. Intenta de nuevo.")
-
-    def _runSelectedSteamAction(self, steamAction: str) -> None:
-        if self.selectedAppId is None or self.selectedCartridgeId is None:
-            self.actionText.set("Selecciona un juego de la biblioteca.")
-            return
-        if not self._selectedCartridgeIsActive():
-            self.actionText.set("Conecta este SSD para abrir o instalar el juego.")
-            return
-        displayName = self.selectedGameTitleText.get()
-        self._showSteamAction(displayName, steamAction)
-        try:
-            if steamAction == "open":
-                self.steamIntegration.openGame(self.selectedAppId)
-                if self.steamIntegration.waitForGameLaunch(self.selectedAppId, time.time()):
-                    self.actionText.set(f"Juego iniciado: {displayName}")
-                    return
-            else:
-                self.steamIntegration.installGame(self.selectedAppId)
-            self._finishSteamAction(displayName, steamAction)
-        except Exception as exc:
-            self.logger.warning("UI Steam action failed: %s", exc)
-            self.actionText.set("Steam no pudo completar la accion. Intenta de nuevo.")
-
-    def _showSteamAction(self, displayName: str, steamAction: str) -> None:
-        self.actionText.set(f"Abriendo juego: {displayName}" if steamAction == "open" else f"Instalando juego: {displayName}")
-
-    def _finishSteamAction(self, displayName: str, steamAction: str) -> None:
-        self.actionText.set(f"Juego abierto: {displayName}" if steamAction == "open" else f"Instalacion enviada: {displayName}")
+        generation = self.generation
+        self.actionText.set("Comprobando cartucho y Steam...")
+        def cancelled():
+            return self.tasks.closed or self.generation != generation
+        def complete(result):
+            if not cancelled():
+                self.actionText.set(result.message)
+                self.sessionService.markSteamActionRun(state)
+        def failed(exc):
+            if not cancelled():
+                self.actionText.set(exc.message if isinstance(exc, CartridgeError) else "Steam no pudo completar la solicitud.")
+                self.logger.warning("Accion Steam: %s", exc)
+        self.tasks.submit(("steam", generation), lambda: self.actions.execute(state, steamAction, cancelled), complete, failed)
 
     def _showStatusPopup(self, message: StatusPopupMessage) -> None:
+        if self.dialogController.active:
+            return
         popupKey = message.key or f"{message.title}:{message.message}"
         if popupKey == self.lastStatusPopupKey:
             return
@@ -725,16 +547,6 @@ class LauncherWindow:
         self.activityItems = ([text] + self.activityItems)[:8]
         if hasattr(self, "activityLabel"):
             self.activityLabel.configure(text="\n".join(self.activityItems))
-
-    def _selectedCartridgeIsActive(self) -> bool:
-        return self.selectedCartridgeId is not None and self.currentState.state == LauncherState.READY and self.currentState.cartridgeId == self.selectedCartridgeId
-
-    def _syncSelectedActionButtons(self) -> None:
-        if not hasattr(self, "selectedOpenButton"):
-            return
-        state = "normal" if self._selectedCartridgeIsActive() else "disabled"
-        self.selectedOpenButton.configure(state=state)
-        self.selectedInstallButton.configure(state=state)
 
 
 def steamSearchResultLabel(result: SteamSearchResult) -> str:
@@ -760,10 +572,12 @@ def activityKeyFromState(state: AppState) -> str:
 
 
 def runtimeStatusMessage(runtimeStatus: RuntimeStatus) -> str:
+    if runtimeStatus.phase == "unconfirmed":
+        return "Solicitud enviada; inicio no confirmado. Revisa Steam."
     if runtimeStatus.phase == "running":
         return f"Steam inicio {runtimeStatus.displayName}."
     if runtimeStatus.phase == "sending":
-        return f"Abriendo juego: {runtimeStatus.displayName}"
+        return f"Enviando solicitud a Steam: {runtimeStatus.displayName}"
     if runtimeStatus.action == "open":
         return f"Steam esta abriendo {runtimeStatus.displayName}."
     if runtimeStatus.action == "install":

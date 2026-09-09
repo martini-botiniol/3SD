@@ -42,12 +42,12 @@ def preparedCartridge(root: Path) -> Path:
     (root / "SteamLibrary").mkdir()
     manifest = {
         "schemaVersion": 1,
-        "cartridgeId": "cart-1",
+        "cartridgeId": "00000000-0000-4000-8000-000000000001",
         "displayName": "Game A",
         "platform": "STEAM",
         "appId": "111",
         "libraryPath": "SteamLibrary",
-        "createdAt": "now",
+        "createdAt": "2026-09-08T00:00:00Z",
     }
     (metadata / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     (metadata / "signature.sig").write_text("signature", encoding="utf-8")

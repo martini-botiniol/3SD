@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from urllib.request import Request, urlopen
+from cartridge_launcher.infrastructure.storage import atomicWrite
 
 try:
     from PIL import Image, ImageTk
@@ -11,9 +12,11 @@ except ModuleNotFoundError:
 
 
 class CoverCache:
-    def __init__(self, cacheDirectory: Path):
+    def __init__(self, cacheDirectory: Path, tasks=None, onReady=lambda: None):
         self.cacheDirectory = cacheDirectory
         self.memory: dict[tuple[str, tuple[int, int]], object] = {}
+        self.tasks, self.onReady = tasks, onReady
+        self.failed: set[str] = set()
 
     def get(self, appId: str, url: str, size: tuple[int, int]):
         if Image is None or ImageTk is None:
@@ -24,10 +27,21 @@ class CoverCache:
         self.cacheDirectory.mkdir(parents=True, exist_ok=True)
         imagePath = self.cacheDirectory / f"{appId}.jpg"
         if not imagePath.is_file():
+            if self.tasks is not None:
+                if appId not in self.failed:
+                    def complete(success):
+                        if success:
+                            self.onReady()
+                        else:
+                            self.failed.add(appId)
+                    self.tasks.submit(("cover", appId), lambda: downloadCover(url, imagePath),
+                                      complete, lambda _exc: self.failed.add(appId))
+                return None
             if not downloadCover(url, imagePath):
                 return None
         try:
-            image = Image.open(imagePath).resize(size)
+            with Image.open(imagePath) as original:
+                image = original.resize(size)
             photo = ImageTk.PhotoImage(image)
             self.memory[key] = photo
             return photo
@@ -40,16 +54,10 @@ class CoverCache:
 
 
 def downloadCover(url: str, imagePath: Path) -> bool:
-    tempPath = imagePath.with_suffix(".tmp")
     try:
         request = Request(url, headers={"User-Agent": "3SD/0.1"})
         with urlopen(request, timeout=10) as response:
-            tempPath.write_bytes(response.read())
-        tempPath.replace(imagePath)
+            atomicWrite(imagePath, response.read())
         return True
     except Exception:
-        try:
-            tempPath.unlink()
-        except OSError:
-            pass
         return False

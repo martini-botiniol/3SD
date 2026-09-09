@@ -26,12 +26,14 @@ class LocalRegistryTests(unittest.TestCase):
 
             self.assertFalse(registry.delete("missing"))
 
-    def testInvalidJsonLoadsAsEmptyRegistry(self) -> None:
+    def testInvalidJsonRaisesRecoverableError(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "registry.json"
             path.write_text("{", encoding="utf-8")
 
-            self.assertEqual(LocalRegistry(path).all(), ())
+            from cartridge_launcher.domain.errors import CartridgeError
+            with self.assertRaises(CartridgeError):
+                LocalRegistry(path).all()
 
     def testWriteReplacesTemporaryFileAtomically(self) -> None:
         with TemporaryDirectory() as directory:

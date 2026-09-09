@@ -19,7 +19,8 @@ def main() -> None:
         with ZipFile(output, "w", ZIP_DEFLATED) as archive:
             archive.write(wheel, f"wheelhouse/{wheel.name}")
             for name in ("Preparar-3SD.bat", "Abrir-3SD.bat", "Diagnosticar-3SD.bat", "README.md", "MANUAL.md",
-                         "scripts/prepare_3sd.py", "scripts/cleanup_legacy.ps1", "scripts/smoke_windows.py"):
+                         "scripts/prepare_3sd.py", "scripts/cleanup_legacy.ps1", "scripts/smoke_windows.py",
+                         "docs/ACCEPTANCE.md", "requirements-build.txt"):
                 archive.write(root / name, name)
         print(output)
 
