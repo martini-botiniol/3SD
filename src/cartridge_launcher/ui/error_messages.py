@@ -13,6 +13,9 @@ class FriendlyError:
 
 
 ERROR_MESSAGES = {
+    ErrorCode.STORAGE_BUSY: FriendlyError("Operacion en curso", "Otra operacion esta usando los datos.", "Espera a que termine y vuelve a intentar."),
+    ErrorCode.STORAGE_WRITE_ERROR: FriendlyError("No se puede guardar", "No se puede escribir en el disco.", "Revisa la proteccion de escritura, los permisos y el espacio disponible."),
+    ErrorCode.LIBRARY_NOT_WRITABLE: FriendlyError("SSD sin escritura", "No se puede escribir en la biblioteca de Steam.", "Revisa la proteccion de escritura, los permisos y el espacio del SSD; despues vuelve a intentar."),
     ErrorCode.UNSUPPORTED_AUTHORIZATION: FriendlyError("Actualiza 3SD", "La autorizacion pertenece a una version mas reciente.", "Actualiza la aplicacion; no repares ni sobrescribas el cartucho."),
     ErrorCode.CONVERSION_REQUIRED: FriendlyError("Cartucho de version anterior", "Este cartucho necesita prepararse una sola vez.", "Usa Preparar para usar en cualquier PC."),
     ErrorCode.STORAGE_ERROR: FriendlyError("Datos locales no disponibles", "El registro esta ocupado o dañado.", "Revisa el respaldo del registro y vuelve a intentar."),

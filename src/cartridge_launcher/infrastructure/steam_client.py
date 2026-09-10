@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import tempfile
 import time
 import webbrowser
 from pathlib import Path
@@ -17,6 +18,26 @@ class SteamClient:
 
     def isLibraryRegistered(self, libraryRoot: Path) -> bool:
         return any(path.resolve() == libraryRoot.resolve() for path in steamLibraryFolders())
+
+    def ensureLibraryWritable(self, libraryRoot: Path) -> None:
+        steamapps = libraryRoot / "steamapps"
+        try:
+            # Older cartridges only created SteamLibrary. Prepare Steam's child
+            # directory without recreating a missing/disconnected library root.
+            steamapps.mkdir(exist_ok=True)
+            # Probe the actual Steam directory, not the cartridge metadata folder.
+            # A unique temporary file never overwrites game or Steam files.
+            with tempfile.TemporaryFile(prefix=".3sd-write-", dir=steamapps) as probe:
+                probe.write(b"3SD")
+                probe.flush()
+                os.fsync(probe.fileno())
+        except OSError as exc:
+            raise CartridgeError(
+                ErrorCode.LIBRARY_NOT_WRITABLE,
+                f"No se puede escribir en {steamapps}. Revisa si el SSD esta en solo lectura, "
+                "los permisos de escritura y el espacio disponible. "
+                "No se envio la solicitud a Steam.",
+            ) from exc
 
     def installationState(self, appId: str, libraryRoot: Path) -> str:
         path = appManifestPathInLibrary(appId, libraryRoot)
