@@ -128,6 +128,61 @@ def test_partial_install_is_sent_to_steam_for_completion(action):
     client.openGame.assert_not_called()
 
 
+@pytest.mark.parametrize("requested", ["auto", "open", "install"])
+def test_unwritable_library_blocks_steam_request(action, requested):
+    service, _, client, _, state = action
+    client.ensureLibraryWritable.side_effect = CartridgeError(ErrorCode.LIBRARY_NOT_WRITABLE, "Solo lectura")
+    with pytest.raises(CartridgeError) as exc:
+        service.execute(state, requested)
+    assert exc.value.code == ErrorCode.LIBRARY_NOT_WRITABLE
+    client.ensureLibraryWritable.assert_called_once_with(Path(state.rootPath) / "SteamLibrary")
+    client.openGame.assert_not_called()
+    client.installGame.assert_not_called()
+    assert service.statusStore.read() is None
+
+
+def test_write_probe_preserves_existing_steam_files(tmp_path):
+    steamapps = tmp_path / "steamapps"
+    steamapps.mkdir()
+    manifest = steamapps / "appmanifest_111.acf"
+    manifest.write_bytes(b"existing manifest")
+    SteamClient().ensureLibraryWritable(tmp_path)
+    assert list(steamapps.iterdir()) == [manifest]
+    assert manifest.read_bytes() == b"existing manifest"
+
+
+def test_write_probe_prepares_empty_legacy_library(tmp_path):
+    SteamClient().ensureLibraryWritable(tmp_path)
+    assert (tmp_path / "steamapps").is_dir()
+    assert list((tmp_path / "steamapps").iterdir()) == []
+
+
+def test_write_probe_does_not_recreate_missing_library(tmp_path):
+    library = tmp_path / "removed" / "SteamLibrary"
+    with pytest.raises(CartridgeError):
+        SteamClient().ensureLibraryWritable(library)
+    assert not library.parent.exists()
+
+
+@pytest.mark.parametrize("failure", [PermissionError("readonly"), OSError("disk full")])
+def test_write_probe_reports_creation_failure(tmp_path, failure):
+    with patch("cartridge_launcher.infrastructure.steam_client.tempfile.TemporaryFile", side_effect=failure):
+        with pytest.raises(CartridgeError) as exc:
+            SteamClient().ensureLibraryWritable(tmp_path)
+    assert exc.value.code == ErrorCode.LIBRARY_NOT_WRITABLE
+    assert str(tmp_path / "steamapps") in exc.value.message
+
+
+def test_write_probe_reports_flush_failure_and_cleans_up(tmp_path):
+    steamapps = tmp_path / "steamapps"
+    steamapps.mkdir()
+    with patch("cartridge_launcher.infrastructure.steam_client.os.fsync", side_effect=OSError("write failure")):
+        with pytest.raises(CartridgeError) as exc:
+            SteamClient().ensureLibraryWritable(tmp_path)
+    assert exc.value.code == ErrorCode.LIBRARY_NOT_WRITABLE
+    assert list(steamapps.iterdir()) == []
+
+
 def test_launch_timeout_is_not_reported_as_running(action):
     service, _, client, _, state = action
     client.waitForGameLaunch.return_value = False

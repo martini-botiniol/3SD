@@ -53,6 +53,7 @@ class SteamActionService:
                 raise CartridgeError(ErrorCode.GAME_NOT_INSTALLED, "Instala o completa la descarga en Steam.")
             if gone():
                 raise CartridgeError(ErrorCode.DEVICE_REMOVED, "El cartucho fue retirado.")
+            self.client.ensureLibraryWritable(library)
 
             def status(phase):
                 if not gone():

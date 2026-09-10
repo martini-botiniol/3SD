@@ -19,6 +19,23 @@ Steam conserva el control de cuentas, licencias, descargas y ejecución.
 Antes de retirar físicamente el SSD, termina juegos y descargas que lo utilicen.
 3SD cancela sus esperas al desconectar, pero no cierra juegos a la fuerza.
 
+Antes de enviar una solicitud a Steam, 3SD comprueba la escritura en
+`SteamLibrary/steamapps` con un archivo temporal que elimina al terminar.
+Si falla, muestra la ruta afectada y detiene la solicitud. Esta comprobación
+no garantiza espacio suficiente para una descarga ni permisos sobre cada archivo
+del juego. La app no cambia automáticamente la protección de escritura del disco.
+Para trasladar un juego, el SSD debe conservar tanto su carpeta en
+`steamapps/common` como su `steamapps/appmanifest_<AppID>.acf`; el manifiesto
+de 3SD solo identifica el juego y no contiene su instalación.
+
+El archivo `.cartridge/write.lock` coordina las operaciones de 3SD. Permanece
+en el SSD, pero su existencia no significa que esté bloqueado: Windows libera
+el bloqueo al cerrar el archivo o terminar el proceso. No protege el disco
+contra escritura ni bloquea los archivos del juego. No lo borres durante una
+operación. La espera por un bloqueo ocupado tiene un límite de 10 segundos,
+tras el cual se informa el error y se puede reintentar. Este límite no cubre
+una operación de entrada/salida que el propio dispositivo deje sin responder.
+
 ## Paquete autónomo Windows
 
 Extrae completo `3SD-0.2.0-windows-x64.zip`. Conserva `3SD.exe` junto a `_internal`.
